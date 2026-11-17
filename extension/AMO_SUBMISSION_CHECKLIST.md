@@ -6,7 +6,7 @@ The long description, single purpose and permission justifications are the same 
 
 ## Version and what changed
 
-Same as `CHROME_SUBMISSION_CHECKLIST.md`: upload `1.2.0` as it is in `manifest.json`, unless an earlier build was already uploaded at that version or higher.
+Same as `CHROME_SUBMISSION_CHECKLIST.md`: upload `1.3.0` as it is in `manifest.json`, unless an earlier build was already uploaded at that version or higher.
 For the "what changed" summary, use that file's "What changed since the store-prep version" list.
 
 ## Before you start
