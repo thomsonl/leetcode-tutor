@@ -154,6 +154,7 @@ export class LocalBackend {
     reserveTokens = DEFAULT_RESERVE_TOKENS,
     probe = probeServer,
     windowSetting = DEFAULT_WINDOW_SETTING,
+    systemMessage = TUTOR_SYSTEM_MESSAGE,
   }) {
     if (!model) {
       throw new Error(
@@ -203,7 +204,7 @@ export class LocalBackend {
     // (below) can restore exactly this. Ollama's native /api/chat accepts
     // this exact same messages shape too, so history/resetContext and the fit
     // are all shared unchanged between both API styles.
-    this.systemMessage = { role: 'system', content: TUTOR_SYSTEM_MESSAGE };
+    this.systemMessage = { role: 'system', content: systemMessage };
     this.history = [this.systemMessage];
     // The full problem description for whichever problem is currently being
     // discussed, if one has been seen yet - `{ problemId, title, slug,

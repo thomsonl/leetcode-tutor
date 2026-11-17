@@ -21,6 +21,7 @@
 
 import { PROVIDERS, OLLAMA_BASE_URL, OPENAI_BASE_URL, defaultRuntime } from './providers.js';
 import { LocalBackend } from './local-backend.js';
+import { systemMessageFor } from './tutor-prompt.js';
 import { AnthropicBackend, ANTHROPIC_BASE_URL, DEFAULT_ANTHROPIC_MODEL } from './anthropic-backend.js';
 import { ProfileError, cleanActiveProfile, cleanProfiles, findProfile, migrateProfiles, profileName } from './profiles.js';
 
@@ -363,6 +364,7 @@ export function buildBackend(settings, secrets, { probe } = {}) {
       apiStyle: id === 'openai' ? 'openai' : null,
       numCtx: id === 'openai' ? OPENAI_CONTEXT_TOKENS : fields.contextTokens || DEFAULT_LOCAL_CONTEXT_TOKENS,
       windowSetting: WINDOW_SETTING,
+      systemMessage: systemMessageFor(id),
       ...(probe ? { probe } : {}),
     });
   }

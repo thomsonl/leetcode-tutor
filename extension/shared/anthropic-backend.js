@@ -15,6 +15,7 @@
 // Pure JavaScript with no Node API (extension/shared.test.js checks that).
 
 import { LocalBackend } from './local-backend.js';
+import { systemMessageFor } from './tutor-prompt.js';
 
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
 export const ANTHROPIC_VERSION = '2026-10-21';
@@ -87,6 +88,7 @@ export class AnthropicBackend extends LocalBackend {
       // truncates (an over-long request is refused instead).
       probe: async () => null,
       windowSetting: 'the Anthropic provider',
+      systemMessage: systemMessageFor('anthropic'),
     });
     this.maxTokens = maxTokens;
   }

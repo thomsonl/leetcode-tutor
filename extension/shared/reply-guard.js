@@ -36,6 +36,11 @@ export const STUCK_MAX_CHARS = 450;
 // rest of a runaway local generation.
 export const EARLY_STOP_FACTOR = 1.6;
 
+// Appended to the message of an optimal-runtime question, next to where the
+// model answers, like SUBMIT_ADDENDUM for a Submit: a small model follows a
+// rule beside the question far more reliably than one in the system message.
+export const OPTIMAL_NOTE = '\n\n(Answer first and plainly: are their time and space the best achievable for this problem? If yes, say so. If not, say only that a better bound exists, never the bound, a method, a data structure or "one pass", then ask one question about what their code repeats. No edge-case question.)';
+
 // What stands in when a held reply and its one re-ask both break a rule and
 // nothing safe is left of either.
 export const FALLBACK_TEXT = {
@@ -43,6 +48,7 @@ export const FALLBACK_TEXT = {
   laterHint: 'Go back to the step from the last hint and trace just that part of your code on a small input. What happens there?',
   stuck: 'What have you tried so far, and which step is unclear? I can give you a small hint if you like.',
   other: 'I could not answer that within my tutoring rules. Could you ask it another way?',
+  optimal: 'Count how many times your code touches each element, and where it repeats work. What do you notice?',
 };
 
 // ---- turn kinds ----------------------------------------------------------------
@@ -51,13 +57,16 @@ const ANSWER_RE = /\b(?:full|complete|whole|entire|working)\s+(?:solution|answer
 const HINT_RE = /\bhints?\b|\bnudge\b|\bclue\b|\bpista\b/i;
 const STUCK_RE = /\b(?:i'?m|i\s+am|im)\s+(?:so\s+|really\s+|totally\s+|completely\s+)?stuck\b|\bno\s+idea\s+(?:how|where|what)\b|\bdon'?t\s+know\s+(?:how|where|what)\s+to\s+(?:start|begin|do|go)\b/i;
 const ALTERNATIVES_RE = /\b(?:better|faster|other|another|different|alternative|more\s+efficient|cleaner|optimal)\s+(?:way|ways|approach|approaches|method|methods|solution|solutions|algorithm|algorithms)\b|\balternatives?\b|\boptimi[sz]e\b/i;
+// Asking whether the code is already as good as it can be: answered with a
+// yes or "a better bound exists", never the bound or the method.
+const OPTIMAL_ASK_RE = /\b(?:is|are)\s+(?:this|it|my\s+(?:solution|code|approach|runtime|time(?:\s+complexity)?|complexity))\s+(?:the\s+)?(?:optimal|best)\b|\boptimal\s+(?:run\s*time|runtime|time|complexity|space)\b|\b(?:best|fastest)\s+(?:possible|achievable|known)\b|\bcan\s+(?:this|it|i)\s+(?:be\s+)?(?:made\s+|done\s+)?(?:faster|better|more\s+efficient)\b|\bam\s+i\s+(?:at|there)\b|\b(?:fast|good)\s+enough\b|\bany\s+(?:faster|better)\b|\bshould\s+i\s+(?:keep\s+)?(?:looking|optimi[sz]ing)\b/i;
 const CODE_REQUEST_RE = /\b(?:show|give|write|send|share|post)\s+(?:me\s+)?(?:the\s+|some\s+|working\s+)?(?:code|implementation|pseudo-?code)\b|\b(?:with|in|as)\s+(?:the\s+)?(?:code|pseudo-?code)\b|\bcode\s+(?:it|this|that)\b|\bimplement\s+(?:it|this|that)\b|\bwrite\s+(?:it|this|that)\s+(?:out|for\s+me)\b|\bpseudo-?code\b/i;
 const FIX_REQUEST_RE = /\b(?:fix|repair|correct\s+(?:it|this|that|my)|how\s+(?:do|can|should|would)\s+i\s+(?:change|correct|make))\b/i;
 
 // What kind of turn the student's own words ask for. `trigger` 'submit' is a
 // Submit review; `hintsGiven` counts earlier hint turns on this problem.
 // Returns { kind, hintNumber? } with kind one of 'submit', 'answer', 'hint',
-// 'stuck', 'alternatives', 'chat'.
+// 'stuck', 'alternatives', 'optimal', 'chat'.
 export function classifyMessage(text, { trigger = null, hintsGiven = 0 } = {}) {
   if (trigger === 'submit') return { kind: 'submit' };
   const value = typeof text === 'string' ? text : '';
@@ -65,6 +74,7 @@ export function classifyMessage(text, { trigger = null, hintsGiven = 0 } = {}) {
   if (HINT_RE.test(value)) return { kind: 'hint', hintNumber: hintsGiven + 1 };
   const alternatives = ALTERNATIVES_RE.test(value);
   if (alternatives) return { kind: CODE_REQUEST_RE.test(value) ? 'answer' : 'alternatives' };
+  if (OPTIMAL_ASK_RE.test(value) && !CODE_REQUEST_RE.test(value)) return { kind: 'optimal' };
   if (CODE_REQUEST_RE.test(value) || FIX_REQUEST_RE.test(value)) return { kind: 'answer' };
   if (STUCK_RE.test(value) && !value.includes('?')) return { kind: 'stuck' };
   return { kind: 'chat' };
@@ -76,7 +86,7 @@ export function classifyMessage(text, { trigger = null, hintsGiven = 0 } = {}) {
 // named once the student wrote any of its terms, its code shows one of its
 // signals, or a reply the student already saw mentioned it.
 const TECHNIQUES = [
-  { id: 'hash-map', terms: /\bhash\s*(?:map|table|maps|tables|ing)\b|\bhashmaps?\b|\bdictionar(?:y|ies)\b|\bdicts?\b|\blookup\s+table\b/i, signals: /\bdict\s*\(|\bdefaultdict\b|\bCounter\s*\(|=\s*\{\s*\}|\bHashMap\b|\bunordered_map\b|\bnew\s+Map\b|\bMap\s*<|\bmap\s*\[|\bmake\s*\(\s*map\b|\bdictionary\b|\bhash\b/i },
+  { id: 'hash-map', terms: /\bhash\s*(?:map|table|maps|tables|ing)\b|\b(?:in|into|to|from)\s+the\s+map\b|\bhashmaps?\b|\bdictionar(?:y|ies)\b|\bdicts?\b|\blookup\s+table\b/i, signals: /\bdict\s*\(|\bdefaultdict\b|\bCounter\s*\(|=\s*\{\s*\}|\bHashMap\b|\bunordered_map\b|\bnew\s+Map\b|\bMap\s*<|\bmap\s*\[|\bmake\s*\(\s*map\b|\bdictionary\b|\bhash\b/i },
   { id: 'hash-set', terms: /\bhash\s*sets?\b|\bhashsets?\b/i, signals: /\bset\s*\(|\bHashSet\b|\bunordered_set\b|\bnew\s+Set\b|\bSet\s*<|=\s*\{\s*\w[^:}]*\}/i },
   { id: 'heap', terms: /\b(?:min-?|max-?)?heaps?\b|\bpriority\s+queues?\b/i, signals: /\bheapq\b|\bPriorityQueue\b|\bpriority_queue\b|\bheap\b/i },
   { id: 'stack', terms: /\bmonotonic\s+(?:stack|queue)\b|\b(?:an?|explicit|own)\s+stack\b|\bstack-based\b|\buse\s+a\s+stack\b/i, signals: /\bstack\b/i },
@@ -97,6 +107,9 @@ const TECHNIQUES = [
   { id: 'backtracking', terms: /\bbacktrack\w*\b/i, signals: null },
   { id: 'bits', terms: /\bbit\s*(?:manipulation|mask|masks|masking|wise)\b|\bbitmasks?\b|\bxor\b/i, signals: /\^|<<|>>|\bxor\b/i },
   { id: 'sorting', terms: /\bsort(?:ing)?\s+(?:the|it|them|your|both|first|array|list|input|numbers|values)\b|\bsorted\s+order\b|\bafter\s+sorting\b/i, signals: /\bsort\s*\(|\bsorted\s*\(|\.sort\b|\bArrays\.sort\b/i },
+  { id: 'data-structure', terms: /\bdata[\s-]+structures?\b/i, signals: null },
+  { id: 'lookup', terms: /\blook(?:ing)?[\s-]*ups?\b|\bconstant[\s-]+time\b|\bcomplements?\b/i, signals: /\bdict\s*\(|\bdefaultdict\b|=\s*\{\s*\}|\bHashMap\b|\bunordered_map\b|\bnew\s+Map\b|\bMap\s*</ },
+  { id: 'remembering', terms: /\bremember(?:ing)?\b|\bstor(?:e|ing)\s+(?:the\s+|each\s+)?(?:values?|numbers?|elements?|indices|indexes)\b|\bkeep\s+track\s+of\s+(?:the\s+)?(?:values?|numbers?|elements?|what)\b/i, signals: /\bseen\b|\bvisited\b|\bmemo\b|\bcache\b|\bdp\b|\bset\s*\(|\bdict\s*\(|=\s*\{\s*\}|\bHashMap\b|\bunordered_(?:map|set)\b/ },
   { id: 'recursion', terms: /\brecursion\b|\brecursive(?:ly)?\b/i, signals: null },
 ];
 
@@ -175,7 +188,29 @@ const STUCK_QUESTION_RE = /\b(?:tried|try|attempted|so\s+far|unclear|confus\w*|s
 const IMPROVE_RE = /\b(?:improv\w*|optimi[sz]\w*|faster|more\s+efficient(?:ly)?|efficiency|speed\s+(?:it\s+)?up|better\s+(?:method|approach|way|algorithm|solution|complexity))\b/i;
 const VERDICT_RE = /\b(?:accepted|would\s+pass|will\s+pass|should\s+pass|passes\s+all\s+(?:the\s+)?(?:tests?|test\s+cases|cases)|time\s+limit\s+exceeded|wrong\s+answer\s+verdict)\b/i;
 const OPTIMAL_RE = /\b(?:optimal\s+(?:solution|approach|complexity)|(?:a\s+)?(?:better|more\s+efficient|faster)\s+(?:approach|solution|algorithm|method|way)\s+(?:would|is|exists|could)|you\s+could\s+(?:instead\s+)?(?:use|switch)|consider\s+using|switch(?:ing)?\s+to)\b/i;
-const REPAIR_RE = /\b(?:to\s+fix\s+(?:this|it|that|the)|the\s+fix\s+is|fix(?:ed)?\s+(?:it|this)\s+by|change\s+(?:the|your|it|this|that|line)\b[^.!?\n]{0,80}\bto\b|should\s+(?:start|begin|instead|be\s+changed)|start\s+(?:the\s+inner\s+loop|j)\s+at|replace\b[^.!?\n]{0,60}\bwith\b|instead\s+of\b[^.!?\n]{0,60}\buse\b|you\s+(?:need|have)\s+to\s+(?:change|add|start|use)|(?:a|the)\s+corrected\s+version)\b/i;
+// The part of OPTIMAL_RE that tells the student which method to use. A Submit
+// review and an optimal-runtime answer may say the code is (not) at the best
+// bound, but never what to switch to.
+const OPTIMAL_SWITCH_RE = /\b(?:you\s+could\s+(?:instead\s+)?(?:use|switch)|consider\s+using|switch(?:ing)?\s+to)\b/i;
+// For a Submit review or an optimal-runtime answer: "you are at the best
+// bound" may name the student's own complexity, while "a better bound is
+// O(n)" or "in a single pass" gives the target away. A sentence that states a
+// target is kept only when it says the student is at the bound, or compares
+// to their own complexity ("better than O(n^2)") and states no second one.
+const AT_BOUND_RE = /\b(?:you(?:'re|\s+are)|your\s+(?:code|solution|approach|time|space|runtime|algorithm|implementation)\s+(?:is|are))\s+(?:already\s+)?(?:at|on|there|optimal|the\s+best|as\s+good|using\s+the\s+best)\b/i;
+const THAN_OWN_RE = /\bthan\s+(?:your\s+|the\s+current\s+|the\s+)?(?:current\s+)?O\s*\(/i;
+const OWN_COMPLEXITY_RE = /\b(?:your|its)\s+(?:current\s+)?(?:\w+\s+)?O\s*\([^)]*\)/gi;
+const SINGLE_PASS_RE = /\b(?:one|single)[\s-]+pass\b/i;
+function statesTarget(text) {
+  if (SINGLE_PASS_RE.test(text)) return true;
+  if (!TARGET_COMPLEXITY_RE.test(text)) return false;
+  if (AT_BOUND_RE.test(text)) return false;
+  // A complexity the sentence gives to their own code ("your O(1) space") is not a target.
+  const targets = text.replace(OWN_COMPLEXITY_RE, '');
+  if (THAN_OWN_RE.test(text) && (targets.match(/\bO\s*\(/g) || []).length <= 1) return false;
+  return true;
+}
+const REPAIR_RE = /\b(?:how\s+(?:you|they)\s+(?:might|could|can|would)\s+(?:adjust|change|fix|modify|avoid)|adjust(?:ing)?\s+(?:the|your)|to\s+fix\s+(?:this|it|that|the)|the\s+fix\s+is|fix(?:ed)?\s+(?:it|this)\s+by|change\s+(?:the|your|it|this|that|line)\b[^.!?\n]{0,80}\bto\b|should\s+(?:start|begin|instead|be\s+changed)|start\s+(?:the\s+inner\s+loop|j)\s+at|replace\b[^.!?\n]{0,60}\bwith\b|instead\s+of\b[^.!?\n]{0,60}\buse\b|you\s+(?:need|have)\s+to\s+(?:change|add|start|use)|(?:a|the)\s+corrected\s+version)\b/i;
 // Lines that make a block program code: definitions, control flow,
 // statements. A plain assignment of a literal (`nums = [1, 0, 2]`) or a call
 // (`count_islands(grid)`) is an example input, not code.
@@ -278,6 +313,7 @@ export function turnPolicy(kindInfo) {
       noComplexity: first ? 'any' : 'target',
       noPlan: !first,
       needsQuestion: false,
+      needsStatement: !first,
       noImprove: first,
       noEdgeCase: first,
       fallback: first ? FALLBACK_TEXT.hint : FALLBACK_TEXT.laterHint,
@@ -304,8 +340,11 @@ export function turnPolicy(kindInfo) {
   if (kind === 'chat') {
     return { kind, mode: 'sentence', dropFences: 'foreign', dropTechniques: true, dropTargets: true, dropRepairs: true, fallback: FALLBACK_TEXT.other };
   }
+  if (kind === 'optimal') {
+    return { kind, mode: 'sentence', dropFences: 'foreign', dropTechniques: true, dropSuggestions: true, dropVerdicts: true, dropRepairs: true, fallback: FALLBACK_TEXT.optimal };
+  }
   if (kind === 'submit') {
-    return { kind, mode: 'sentence', dropFences: 'foreign', dropTechniques: true, dropTargets: true, dropVerdicts: true, fallback: FALLBACK_TEXT.other };
+    return { kind, mode: 'sentence', dropFences: 'foreign', dropTechniques: true, dropSuggestions: true, dropVerdicts: true, fallback: FALLBACK_TEXT.other };
   }
   return { kind: 'answer', mode: 'word', fallback: FALLBACK_TEXT.other };
 }
@@ -360,8 +399,16 @@ export function checkHeld(text, policy, context) {
   }
   if (policy.noPlan && (prose.match(PLAN_ITEM_RE) || []).length >= 3) violations.push({ rule: 'plan' });
   if (policy.needsQuestion && !askedWhatTried(prose)) violations.push({ rule: 'question' });
+  if (policy.needsStatement && onlyQuestions(prose)) violations.push({ rule: 'statement' });
   if (policy.maxChars && text.trim().length > policy.maxChars) violations.push({ rule: 'length' });
   return violations;
+}
+
+// Whether every sentence of `prose` is a question (a later hint must state
+// one more concrete thing about their code, not ask again).
+function onlyQuestions(prose) {
+  const sentences = prose.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter(Boolean);
+  return sentences.length > 0 && sentences.every((sentence) => sentence.endsWith('?'));
 }
 
 // Whether some question in `prose` asks what the student tried or which step
@@ -386,6 +433,7 @@ function dropReason(unit, policy, context) {
   if (policy.dropVerdicts && VERDICT_RE.test(text)) return 'verdict';
   if (policy.dropTechniques && unnamedTechniques(text, context.named).length) return 'technique';
   if (policy.dropTargets && (TARGET_COMPLEXITY_RE.test(text) || OPTIMAL_RE.test(text))) return 'complexity';
+  if (policy.dropSuggestions && (OPTIMAL_SWITCH_RE.test(text) || statesTarget(text))) return 'complexity';
   if (policy.dropRepairs && REPAIR_RE.test(text)) return 'repair';
   return null;
 }
@@ -401,6 +449,7 @@ const RULE_TEXT = {
   plan: 'It lays out a step-by-step plan. Give one nudge instead.',
   question: 'It does not ask what the student tried or which step is unclear.',
   length: 'It is too long.',
+  statement: 'It only asks questions. A later hint states one more concrete thing about their code, then may ask.',
   'edge-case': 'It is about an edge case. A first hint asks about what their code does or repeats',
   verdict: 'It guesses a LeetCode verdict.',
   repair: 'It gives a fix the student did not ask for.',
@@ -437,7 +486,7 @@ export function salvage(text, policy, context) {
       if (kept.length) kept.push(piece);
       continue;
     }
-    if (checkHeld(piece, { ...policy, maxChars: 0, needsQuestion: false, noPlan: false }, context).length) continue;
+    if (checkHeld(piece, { ...policy, maxChars: 0, needsQuestion: false, needsStatement: false, noPlan: false }, context).length) continue;
     if (/^\s*(?:\d+[.)]|[-*+])\s/.test(piece) && policy.noPlan) continue;
     if (policy.maxChars && length + piece.trim().length > policy.maxChars) break;
     kept.push(piece);
@@ -755,6 +804,7 @@ export async function guardedSend({ backend, text, options = {}, turn, onText = 
   if (!turn) return backend.sendMessage(text, { ...options, onChunk: onText });
   const { policy, context } = turn;
   const gate = createGate(policy, context);
+  if (policy.kind === 'optimal') text = `${text}${OPTIMAL_NOTE}`;
   let shown = '';
   const show = (piece) => {
     if (!piece) return;

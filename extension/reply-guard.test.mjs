@@ -16,6 +16,7 @@ import {
   reaskPrompt,
   createReplyGuard,
   guardedSend,
+  OPTIMAL_NOTE,
   FALLBACK_TEXT,
   FIRST_HINT_MAX_CHARS,
 } from './shared/reply-guard.js';
@@ -108,6 +109,13 @@ test('classifyMessage tells the turn kinds apart', () => {
   assert.equal(classifyMessage('Give me the full solution with code.').kind, 'answer');
   assert.equal(classifyMessage('I insist on the complete answer and code.').kind, 'answer');
   assert.equal(classifyMessage('How do I fix this?').kind, 'answer');
+  for (const ask of ['Is this optimal?', "What's the optimal runtime here?", 'Can this be faster?', 'Am I there yet?', 'Is my solution the best possible?', 'Is it fast enough or should I keep looking?']) {
+    assert.equal(classifyMessage(ask).kind, 'optimal', ask);
+  }
+  // An explicit request for another method or for code still wins.
+  assert.equal(classifyMessage('Is there a more optimal approach?').kind, 'alternatives');
+  assert.equal(classifyMessage('Is this optimal? Show me the code.').kind, 'answer');
+  assert.equal(classifyMessage('Give me a hint on the optimal runtime.').kind, 'hint');
   assert.equal(classifyMessage('Can my code use the same element twice?').kind, 'chat');
   assert.equal(classifyMessage('What is my time complexity?').kind, 'chat');
   assert.equal(classifyMessage('anything', { trigger: 'submit' }).kind, 'submit');
@@ -295,6 +303,89 @@ test('a Submit review drops a verdict guess and a volunteered method', async () 
   const backend = fakeBackend([reply]);
   const { shown } = await run(backend, createReplyGuard(), { text: null, trigger: 'submit', code: twoSum });
   assert.equal(shown, 'Your code checks every pair. Readability is good.');
+});
+
+test('an optimal-runtime answer may say the code is at the best bound, never the method', async () => {
+  const reply = 'You are at the best achievable time here, O(n), and the space is fine. A hash map would not change that. Which part of your loop do you trust least?';
+  const backend = fakeBackend([reply]);
+  const { shown } = await run(backend, createReplyGuard(), { text: 'Is this optimal?', code: twoSum });
+  assert.equal(shown, 'You are at the best achievable time here, O(n), and the space is fine. Which part of your loop do you trust least?');
+});
+
+test('an optimal-runtime answer above the bound says so without the method or a switch', async () => {
+  const reply = 'A better bound exists than O(n squared). Consider using a hash map instead. What does your inner loop recompute for each i?';
+  const backend = fakeBackend([reply]);
+  const guard = createReplyGuard();
+  const { shown } = await run(backend, guard, { text: 'Can this be faster?', code: twoSum });
+  assert.equal(shown, 'A better bound exists than O(n squared). What does your inner loop recompute for each i?');
+  // Asking is not a hint turn: a later "hint" still gets the strict first-hint rules.
+  assert.equal(guard.hintsGiven, 0);
+});
+
+test('a Submit review may state whether it is at the best bound', async () => {
+  const reply = 'Your code checks every pair, O(n squared) time and O(1) space. A better bound exists. Switch to a different structure. Which step repeats work?';
+  const backend = fakeBackend([reply]);
+  const { shown } = await run(backend, createReplyGuard(), { text: null, trigger: 'submit', code: twoSum });
+  assert.equal(shown, 'Your code checks every pair, O(n squared) time and O(1) space. A better bound exists. Which step repeats work?');
+});
+
+test('a Submit bound sentence may name the complexity of their own time and space', async () => {
+  const reply = 'Your code checks every pair. A better time bound than O(n^2) exists for this problem, while your O(1) space is already minimal.';
+  const backend = fakeBackend([reply]);
+  const { shown } = await run(backend, createReplyGuard(), { text: null, trigger: 'submit', code: twoSum });
+  assert.equal(shown, reply);
+});
+
+test('only an optimal-runtime question gets the note beside it', async () => {
+  const optimal = fakeBackend(['You are at the best bound.']);
+  await run(optimal, createReplyGuard(), { text: 'Is this optimal?', code: twoSum });
+  assert.equal(optimal.sent[0], `Is this optimal?${OPTIMAL_NOTE}`);
+  const chat = fakeBackend(['Yes.']);
+  await run(chat, createReplyGuard(), { text: 'Why does seen matter?', code: islandCode });
+  assert.equal(chat.sent[0], 'Why does seen matter?');
+});
+
+test('an optimal-runtime answer never states the target bound or a single pass', async () => {
+  const reply = 'A better bound exists than O(n squared). It can be done in a single pass, giving O(n) time. What does your inner loop recompute?';
+  const backend = fakeBackend([reply]);
+  const { shown } = await run(backend, createReplyGuard(), { text: 'Is this optimal?', code: twoSum });
+  assert.equal(shown, 'A better bound exists than O(n squared). What does your inner loop recompute?');
+});
+
+test('asking a leading question about a data structure or a lookup is dropped in chat', async () => {
+  const reply = 'Your loops check every pair. What kind of data structure could look up the other number quickly? Which step repeats work?';
+  const backend = fakeBackend([reply]);
+  const { shown } = await run(backend, createReplyGuard(), { text: 'Guide me through making this faster.', code: twoSum });
+  assert.equal(shown, 'Your loops check every pair. Which step repeats work?');
+});
+
+test('a question that tells them to remember earlier values is dropped unless their code already does', async () => {
+  const reply = 'Your loops check every pair. What could you remember from earlier iterations to skip comparisons? Which step repeats work?';
+  const backend = fakeBackend([reply]);
+  const { shown } = await run(backend, createReplyGuard(), { text: 'Guide me through making this faster.', code: twoSum });
+  assert.equal(shown, 'Your loops check every pair. Which step repeats work?');
+  const own = fakeBackend(['What does seen remember from earlier iterations?']);
+  const kept = await run(own, createReplyGuard(), { text: 'Why does seen matter?', code: islandCode });
+  assert.equal(kept.shown, 'What does seen remember from earlier iterations?');
+});
+
+test('a later hint that only asks questions is re-asked for a statement', async () => {
+  const question = 'Which direction does your visit function not explore?';
+  const statement = 'Your visit function goes down, up and right, but never left. What happens to a land cell only reachable from the right?';
+  const guard = createReplyGuard();
+  await run(fakeBackend(['What does your code do for the cell below?']), guard, { text: 'Give me a hint.', code: islandCode });
+  const backend = fakeBackend([question, statement]);
+  const { shown } = await run(backend, guard, { text: 'Another hint, please.', code: islandCode });
+  assert.equal(backend.instructions.length, 1);
+  assert.match(backend.instructions[0], /only asks questions/);
+  assert.equal(shown, statement);
+});
+
+test('a chat question that tells them how to adjust the loop or what to remember is dropped', async () => {
+  const reply = 'Your loops let j start at i. Can you think of an input where i equals j, and how you might adjust the inner loop? What information would be most useful to remember?';
+  const backend = fakeBackend([reply]);
+  const { shown } = await run(backend, createReplyGuard(), { text: 'Is my code correct?', code: twoSum });
+  assert.equal(shown.trim(), 'Your loops let j start at i.');
 });
 
 test('an answer turn streams word by word with repairs only, code untouched', async () => {

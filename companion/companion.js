@@ -55,7 +55,7 @@ import {
 import { ENABLE_MOUSE_TRACKING, DISABLE_MOUSE_TRACKING, createMouseFilter } from './mouse-input.js';
 import { LocalBackend } from '../extension/shared/local-backend.js';
 import {
-  TUTOR_SYSTEM_MESSAGE,
+  systemMessageFor,
   SUBMIT_ADDENDUM,
   triggerLabel,
   captureHeaderLine,
@@ -343,7 +343,7 @@ class ClaudeBackend {
     // anything the tutor persona needed.
     const options = {
       cwd: SCRATCH_DIR,
-      systemPrompt: TUTOR_SYSTEM_MESSAGE,
+      systemPrompt: systemMessageFor('claude'),
       tools: [],
       mcpServers: {},
       strictMcpConfig: true,
@@ -457,13 +457,14 @@ function makeBackend(config) {
       apiStyle: provider === 'openai' ? 'openai' : LOCAL_API,
       numCtx: config.contextTokens || DEFAULT_LOCAL_NUM_CTX,
       reserveTokens: LOCAL_RESERVE_TOKENS,
+      systemMessage: systemMessageFor(provider),
     });
   }
   if (provider === 'chatgpt') {
     return new CodexBackend({
       model: config.model,
       cwd: path.join(SCRATCH_DIR, 'codex'),
-      systemPrompt: TUTOR_SYSTEM_MESSAGE,
+      systemPrompt: systemMessageFor('chatgpt'),
       maxHistoryTurns: config.options.localMaxHistoryTurns,
     });
   }

@@ -838,7 +838,7 @@ test('without history trimming, a long single-problem conversation eventually ex
   const { out } = await runManyTurnsScenario({
     turnCount: 6,
     capturePort: 18150,
-    roomChars: 3872,
+    roomChars: 4272,
     env: { COMPANION_LOCAL_MAX_HISTORY_TURNS: '0' },
   });
 
@@ -858,7 +858,7 @@ test('COMPANION_LOCAL_MAX_HISTORY_TURNS keeps a long single-problem conversation
   const { out, requests } = await runManyTurnsScenario({
     turnCount: 6,
     capturePort: 18151,
-    roomChars: 3872,
+    roomChars: 4272,
     env: { COMPANION_LOCAL_MAX_HISTORY_TURNS: '1' },
   });
 
@@ -1376,8 +1376,10 @@ test('later Submits carry only a diff; the current code is pinned and the old fu
 // edit is far smaller than the turn that carried the full code.
 test('a diff turn is measurably smaller than the full-code turn', async () => {
   const { requests } = await runSameProblemManyTurns({ turnCount: 2, capturePort: 18173 });
-  const full = requests[0][requests[0].length - 1].content;
-  const diff = requests[1][requests[1].length - 1].content;
+  // Compare the code portion only: the Submit addendum is the same constant text in both turns.
+  const codePart = (m) => m.content.split('\n\nThis was a Submit.')[0];
+  const full = codePart(requests[0][requests[0].length - 1]);
+  const diff = codePart(requests[1][requests[1].length - 1]);
   assert.ok(diff.length < full.length / 2, `diff turn ${diff.length} chars vs full turn ${full.length} chars`);
 });
 

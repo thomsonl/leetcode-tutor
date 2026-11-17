@@ -1244,7 +1244,8 @@ test('end to end: the post-check guard re-asks a leaking hint, and neither the t
 
   assert.equal(await panel.sendMessage('thanks', 'two-sum'), 202);
   await until(() => requests.length === 3, 10000, 'the next request');
-  const history = JSON.stringify(requests[2].messages);
+  // The system message itself names "hash map" as a leak example, so only the conversation turns count.
+  const history = JSON.stringify(requests[2].messages.filter((m) => m.role !== 'system'));
   assert.ok(history.includes('What does your inner loop look for each time?'));
   assert.ok(!history.includes('hash map'), 'the rejected hint left history');
   assert.ok(!history.includes('breaks the tutoring rules'), 'the re-ask instruction was never kept');
