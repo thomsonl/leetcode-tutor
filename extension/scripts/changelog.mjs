@@ -49,7 +49,8 @@ export function parseNotes(text, name = 'notes') {
 export function buildChangelog(dir = NOTES_DIR) {
   const releases = [];
   for (const file of fs.readdirSync(dir).sort()) {
-    if (!file.endsWith('.md')) continue;
+    // The README that explains the format is not a release.
+    if (!file.endsWith('.md') || file === 'README.md') continue;
     const version = file.slice(0, -3);
     if (!parseVersion(version)) throw new NotesError(`${file}: the name must be a version like 1.4.0.md`);
     releases.push({ version, ...parseNotes(fs.readFileSync(path.join(dir, file), 'utf8'), file) });

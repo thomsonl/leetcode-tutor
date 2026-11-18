@@ -42,6 +42,7 @@ test('buildChangelog reads every notes file, newest version first, and refuses a
     fs.writeFileSync(path.join(dir, '1.9.0.md'), 'date: 2026-01-01\n\n- Old.\n');
     fs.writeFileSync(path.join(dir, '1.10.0.md'), 'date: 2026-02-01\n\n- New.\n');
     fs.writeFileSync(path.join(dir, 'README.txt'), 'ignored');
+    fs.writeFileSync(path.join(dir, 'README.md'), '# How to write these\n');
     assert.deepEqual(buildChangelog(dir).releases.map((r) => r.version), ['1.10.0', '1.9.0']);
     fs.writeFileSync(path.join(dir, 'next.md'), 'date: 2026-03-01\n\n- X.\n');
     assert.throws(() => buildChangelog(dir), /must be a version/);
