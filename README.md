@@ -35,7 +35,8 @@ In PowerShell, git and npm print some normal progress in red (for example `Nativ
    Chrome may ask whether leetcode.com may "access other apps and services on this device".
    Choose Allow: the page only talks to the tutor at `localhost:8135`, nothing else on your network.
 3. Click the gear in the Tutor tab to open Settings, and choose a model.
-   A local model (Ollama, LM Studio) or an API key needs nothing else: fill it in and press Save.
+   A local model (Ollama, LM Studio) or an API key needs nothing else: use "Add model", and fill in its settings.
+   Settings save by themselves as you change them.
 4. For a Claude or ChatGPT subscription, first sign in to `claude` or `codex` in a terminal.
    Choose the subscription in Settings, press "Allow starting the helper" in the Helper section, and choose Allow when Chrome asks.
    The extension restarts once to finish this; Settings and any open LeetCode tabs come back by themselves.
@@ -45,7 +46,7 @@ In PowerShell, git and npm print some normal progress in red (for example `Nativ
    npx leetcode-capture-helper install --chrome-id <your extension id>
    ```
 
-   Run it in a terminal, press Check again, and once the Helper says Running, press Save.
+   Run it in a terminal, press Check again, and once the Helper says Running, your choice is saved by itself.
 
 ## Uninstall
 

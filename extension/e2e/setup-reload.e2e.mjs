@@ -95,7 +95,9 @@ async function openProblem() {
 async function showPanel(page) {
   await page.send('Page.bringToFront');
   await page.eval(`document.querySelector('[data-lc-tutor-tab]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))`);
-  await page.waitFor(`${PANEL}.label === 'Not set up'`, { what: 'the panel connected to the worker', timeout: 12000 });
+  // "Not set up" with no model chosen; once the reopened Settings has saved the
+  // Claude subscription (which needs the helper, not there in this test) it is "Offline".
+  await page.waitFor(`['Not set up', 'Offline'].includes(${PANEL}.label)`, { what: 'the panel connected to the worker', timeout: 12000 });
 }
 
 // The worker as a grant leaves it: no connectNative, and runtime.reload()
@@ -114,8 +116,17 @@ async function stageSetupReload({ real = false } = {}) {
   })()`);
   options = await browser.openPage('about:blank');
   await options.send('Page.navigate', { url: `chrome-extension://${browser.extensionId}/settings.html` });
-  await options.waitFor(`document.querySelector('input[name="provider"][value="claude"]')`, { what: 'the options page' });
-  await options.eval(`document.querySelector('input[name="provider"][value="claude"]').click()`);
+  await options.waitFor(`document.getElementById('add-provider') || document.getElementById('add-toggle')`, { what: 'the options page' });
+  // The Claude subscription is chosen as a student does: its row when the
+  // list has one, otherwise a model added for it.
+  const row = await options.eval(`(() => { const r = [...document.querySelectorAll('#profiles .profile')].find((p) => p.querySelector('.profile-meta').textContent.startsWith('Claude subscription')); return r ? r.dataset.id : null; })()`);
+  if (row) {
+    await options.eval(`document.getElementById('profile-${row}-radio').click()`);
+  } else {
+    if (await options.eval(`!document.getElementById('add-provider')`)) await options.click('#add-toggle');
+    await options.eval(`(() => { const s = document.getElementById('add-provider'); s.value = 'claude'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await options.click('#add-profile-button');
+  }
   // The user comes back to the problem tab (a hidden tab draws nothing).
   await page.send('Page.bringToFront');
 }
@@ -167,7 +178,10 @@ try {
     const panel = await page.eval(PANEL);
     check(panel.draft === 'why is my loop off by one?', `draft: ${JSON.stringify(panel.draft)}`);
     const labels = JSON.parse(await page.eval(`sessionStorage.getItem('__labels')`));
-    check(labels.includes('Finishing setup') && !labels.includes('Offline'), JSON.stringify(labels));
+    // (The reopened Settings saved the Claude subscription, which has no
+    // helper here, so "Offline" may follow; what must never show is the
+    // message for an update or a manual reload.)
+    check(labels.includes('Finishing setup') && !/was updated, reloaded or turned off/.test(panel.banner), JSON.stringify({ labels, banner: panel.banner }));
     check(!(await page.eval(`sessionStorage.getItem('lc-tutor-setup-draft')`)), 'the carried message was left in storage');
     await page.screenshot(path.join(shots, 'setup-reload-after.png'), { width: 1100, height: 760 });
     // Nothing reloads it again.
@@ -176,6 +190,15 @@ try {
   });
 
   await scenario('a manual reload or update (no setup notice) keeps its own message and no page reload', async () => {
+    // Back to a first run: the choice the reopened Settings saved is cleared, so
+    // the panel is connected to the worker (a helper model would use the relay).
+    await browser.serviceWorkerEval(`chrome.storage.local.remove(['tutorSettings', 'settingsResume', 'nativeReload'])`);
+    // (The worker keeps what it read, so it starts again before the page does.)
+    await browser.reloadExtension();
+    await page.send('Page.reload');
+    await page.waitFor(`window.__marker === undefined && document.readyState === 'complete' && document.querySelector('[data-lc-tutor-tab]')`, { what: 'the page reloaded by the test' });
+    await showPanel(page);
+    await watchPanel(page);
     await browser.reloadExtension();
     await waitShown(`${PANEL}.label === 'Offline'`, { what: 'Offline', timeout: 10000 });
     const panel = await page.eval(PANEL);

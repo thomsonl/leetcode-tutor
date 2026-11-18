@@ -376,7 +376,7 @@ try {
     check(await page.eval(`window.__posted.some((m) => m.type === 'profile-switched' && m.id === 'haiku')`), 'the worker hears of it');
     check(!(await page.eval(`window.__posted.some((m) => m.type === 'switch-profile' && m.id === 'haiku')`)), 'not through the worker');
     // The companion refuses an id it does not have.
-    await page.eval(`(() => { window.__switchDelayMs = 0; window.__switchStatus = 404; window.__switchBody = { ok: false, error: { code: 'unknown', message: 'The helper app does not have that model saved. Open Manage models and press Save.' } }; })()`);
+    await page.eval(`(() => { window.__switchDelayMs = 0; window.__switchStatus = 404; window.__switchBody = { ok: false, error: { code: 'unknown', message: 'The helper app does not have that model saved. Open Settings and choose it there.' } }; })()`);
     await clickAt('button.model');
     await clickAt('.opt[data-id="sonnet"]');
     await page.waitFor(`!window.__q('.hint').hidden`, { what: 'the refusal' });

@@ -203,7 +203,7 @@
   // After the setup restart: the chosen provider is not saved yet. Shown in
   // the footer only once the helper runs (while it does not, the wait note
   // already says everything), and gone at the next Save.
-  let pendingChoiceNote = null;
+  let saveWaiting = false; // a change is waiting for the helper to run
   let helperCheckNote = null;
 
   function installCommand() {
@@ -727,13 +727,11 @@
       const line = h("div", { class: "keyline" }, h("span", { text: source }));
       if (runtime === "extension" || info.keySource === "saved") {
         line.appendChild(h("button", { type: "button", class: "linkbtn", text: "Replace", onclick: () => { setAction("replace"); $(`${id}-apiKey`).focus(); } }));
-        line.appendChild(h("button", { type: "button", class: "linkbtn", text: "Remove", onclick: () => setAction("remove") }));
+        line.appendChild(h("button", { type: "button", class: "linkbtn", text: "Remove", onclick: () => { setAction("remove"); saveSoon(0); } }));
       }
       wrap.appendChild(line);
     } else if (action === "remove") {
-      wrap.appendChild(
-        h("div", { class: "keyline" }, h("span", { text: "The key will be removed when you save." }), h("button", { type: "button", class: "linkbtn", text: "Undo", onclick: () => setAction(undefined) }))
-      );
+      wrap.appendChild(h("div", { class: "keyline" }, h("span", { text: "Removing the key..." })));
     } else {
       wrap.appendChild(input);
       if (id === "local") wrap.appendChild(h("p", { class: "hint", text: "Only needed if your server requires one." }));
@@ -902,6 +900,7 @@
               render();
               clearResults();
               if (runtime === "helper" && !helper) loadHelper();
+              saveSoon();
             },
           }),
           h("span", { text: RUNTIME_LABELS[runtime] }),
@@ -912,27 +911,18 @@
     return h("div", { class: "field" }, h("span", { class: "label", text: "Where the tutor runs" }), group);
   }
 
+  // The connection settings of the selected model's provider. Only that
+  // provider is drawn: the others are reached by adding a model for them.
   function providerCard(id) {
     const spec = catalog[id];
-    const providerLocked = helperLocked("provider") && runtimeOf(id) === "helper";
-    const radio = h("input", {
-      type: "radio",
-      name: "provider",
-      id: `provider-${id}-radio`,
-      value: id,
-      checked: selected === id,
-      disabled: providerLocked && helper.settings.provider !== id,
-      onchange: () => {
-        selected = id;
-        render();
-        clearResults();
-        if (runtimeOf(id) === "helper" && !helper) loadHelper();
-      },
-    });
-    const title = h("div", { class: "provider-title" }, spec.label, id === "chatgpt" ? h("span", { class: "tag", text: "Experimental" }) : null);
-    const head = h("label", { class: "provider-head" }, radio, h("div", {}, title, h("div", { class: "provider-hint", text: spec.hint })));
+    // Named by the selected model, since these are its connection settings
+    // (the model's provider shares them with its other models).
+    const chosen = draftProfiles.find((p) => p.id === draftActive);
+    const named = chosen ? `Settings for ${profileName(chosen)}` : `${spec.label} settings`;
+    const title = h("div", { class: "provider-title" }, named, id === "chatgpt" ? h("span", { class: "tag", text: "Experimental" }) : null);
+    const head = h("div", { class: "provider-head" }, h("div", {}, title, h("div", { class: "provider-hint", text: spec.hint })));
     const fields = h("div", { class: "fields" }, runtimeRow(id), ...spec.fields.map((f) => fieldFor(id, f)));
-    return h("div", { class: "provider", "data-selected": selected === id }, head, fields);
+    return h("div", { class: "provider", "data-selected": true }, head, fields);
   }
 
   function toggle(id, label, hint, checked, { locked = false, disabled = false } = {}) {
@@ -1038,22 +1028,26 @@
   function drawAll() {
     const fieldset = $("providers");
     for (const node of [...fieldset.children]) if (node.tagName !== "LEGEND") node.remove();
-    for (const id of ORDER) if (catalog[id]) fieldset.appendChild(providerCard(id));
+    if (catalog[selected]) fieldset.appendChild(providerCard(selected));
     renderBehavior();
     renderHelper();
     renderOffline();
     renderConnection();
     renderFoot();
     renderProfiles();
-    autoFindModels("local");
+    // The local model's dropdown is only there while that model is selected.
+    if (selected === "local") autoFindModels("local");
     const can = usable(selected);
     $("test").disabled = !can;
-    $("save").disabled = !can;
     if (can) $("form").removeAttribute("data-disabled");
     else $("form").setAttribute("data-disabled", "");
     // Says why the rest of the form is dimmed: it waits for the helper.
     $("wait-note").hidden = can;
-    if (pendingChoiceNote && can && !$("save-result").textContent) showResult("save-result", "", pendingChoiceNote);
+    // A change made while waiting for the helper is saved once it runs.
+    if (can && saveWaiting) {
+      saveWaiting = false;
+      saveSoon(0);
+    }
     // Poll for the helper only while it is the one needed and not there.
     if (!can && !pollTimer) pollTimer = setInterval(loadHelper, 4000);
     if (can && pollTimer) {
@@ -1067,13 +1061,6 @@
       $(id).textContent = "";
       $(id).removeAttribute("data-kind");
     }
-  }
-
-  // "Saved. The tutor now uses ..." describes the form as it was saved, so
-  // it goes as soon as anything in the form changes (and on a page restored
-  // from the back-forward cache); an error or a "not saved yet" note stays.
-  function formChanged() {
-    if ($("save-result").getAttribute("data-kind") === "ok") showResult("save-result", "", "");
   }
 
   function showResult(id, kind, text) {
@@ -1154,6 +1141,7 @@
       if (runtimeOf(profile.provider) === "helper" && !helper) loadHelper();
     }
     render();
+    saveSoon();
   }
 
   function moveProfile(id, by) {
@@ -1161,7 +1149,7 @@
     const j = i + by;
     if (i < 0 || j < 0 || j >= draftProfiles.length) return;
     [draftProfiles[i], draftProfiles[j]] = [draftProfiles[j], draftProfiles[i]];
-    formChanged();
+    saveSoon();
     renderProfiles();
     const again = $(`profile-${id}-${by < 0 ? "up" : "down"}`);
     if (again && !again.disabled) again.focus();
@@ -1174,8 +1162,8 @@
     const i = draftProfiles.findIndex((p) => p.id === id);
     if (i < 0) return;
     const [gone] = draftProfiles.splice(i, 1);
-    formChanged();
-    profilesNote(null, `Removed ${profileName(gone)}. Save to apply.`);
+    saveSoon();
+    profilesNote(null, `Removed ${profileName(gone)}.`);
     const next = draftProfiles[Math.min(i, draftProfiles.length - 1)];
     if (draftActive === id) {
       draftActive = null;
@@ -1184,7 +1172,7 @@
     } else {
       renderProfiles();
     }
-    const target = next ? $(`profile-${next.id}-radio`) : $("add-provider");
+    const target = next ? $(`profile-${next.id}-radio`) : $("add-provider") || $("add-toggle");
     if (target) target.focus();
   }
 
@@ -1233,6 +1221,7 @@
           if (renaming !== profile.id || document.activeElement === input) return;
           const to = e.relatedTarget;
           commitRename(input);
+          saveSoon();
           const row = input.closest(".profile");
           if (!row || !row.isConnected) return;
           const fresh = profileRow(profile, draftProfiles.indexOf(profile));
@@ -1280,6 +1269,7 @@
     const profile = draftProfiles.find((p) => p.id === id);
     renaming = null;
     if (profile) profile.label = value.trim().slice(0, 60) || null;
+    saveSoon();
     renderProfiles();
     const again = $(`profile-${id}-rename`);
     if (again) again.focus();
@@ -1300,11 +1290,31 @@
 
   // The add row: a provider, a model (the local provider's is the same
   // dropdown of the server's models as its card), an optional name.
+  let addOpen = false; // the add row is behind a button, open on an empty list
+
   function renderAddRow() {
     const row = $("add-profile");
     const keepModel = $("add-model") ? $("add-model").value : "";
     const keepLabel = $("add-label") ? $("add-label").value : "";
     row.textContent = "";
+    const open = addOpen || draftProfiles.length === 0;
+    row.setAttribute("data-open", String(open));
+    if (!open) {
+      row.appendChild(
+        h("button", {
+          type: "button",
+          class: "btn",
+          id: "add-toggle",
+          text: "+ Add model",
+          onclick: () => {
+            addOpen = true;
+            renderAddRow();
+            $("add-provider").focus();
+          },
+        })
+      );
+      return;
+    }
     const select = h("select", {
       id: "add-provider",
       onchange: () => {
@@ -1337,7 +1347,25 @@
       h("div", { class: "field" }, h("label", { for: "add-provider", text: "Provider" }), select),
       h("div", { class: "field" }, h("label", { for: "add-model", text: "Model" }), model),
       h("div", { class: "field" }, h("label", { for: "add-label" }, "Name", h("span", { class: "opt", text: " (optional)" })), label),
-      h("button", { type: "button", class: "btn", id: "add-profile-button", text: "Add model", onclick: addProfile })
+      h(
+        "div",
+        { class: "add-actions" },
+        h("button", { type: "button", class: "btn", id: "add-profile-button", text: "Add model", onclick: addProfile }),
+        draftProfiles.length
+          ? h("button", {
+              type: "button",
+              class: "btn",
+              id: "add-cancel",
+              text: "Cancel",
+              onclick: () => {
+                addOpen = false;
+                profilesNote(null, "");
+                renderAddRow();
+                $("add-toggle").focus();
+              },
+            })
+          : null
+      )
     );
   }
 
@@ -1361,16 +1389,16 @@
     }
     const profile = { id: newProfileId(provider), provider, model, label };
     draftProfiles.push(profile);
-    formChanged();
+    saveSoon();
     $("add-label").value = "";
     if ($("add-model").tagName === "INPUT") $("add-model").value = "";
     typeModelByHand.add = false;
-    if (!draftActive) {
-      chooseDefault(profile.id);
-    } else {
-      renderProfiles();
-    }
-    profilesNote("ok", `Added ${profileName(profile)}. Save to apply.`);
+    // The new model becomes the default, so its connection fields show below
+    // the list. A provider that still needs its key waits for it (autoSave).
+    addOpen = false;
+    chooseDefault(profile.id);
+    profilesNote("ok", `Added ${profileName(profile)}.`);
+    if ($("add-toggle")) $("add-toggle").focus();
   }
 
   function renderProfiles() {
@@ -1485,6 +1513,7 @@
     const allowed = inBrowser && !quiet ? requestPermission(pattern) : Promise.resolve(true);
     const note = $(`${id}-models-note`);
     const button = $(`${id}-find`);
+    if (!button || !note) return;
     button.disabled = true;
     note.textContent = "Looking";
     const baseInput = $(`${id}-baseUrl`);
@@ -1555,34 +1584,104 @@
   }
 
   function failSave(error) {
-    showResult("save-result", "error", error.message);
-    if (error.field) {
-      const target = $(`${selected}-${error.field}`);
-      if (target) target.focus();
+    // Not saved, and the form keeps what was entered: fixing the field saves
+    // again. Focus is not moved, since the student may be typing elsewhere.
+    showResult("save-result", "error", `Not saved. ${error.message.charAt(0).toUpperCase()}${error.message.slice(1)}`);
+    const target = error.field ? $(`${selected}-${error.field}`) : null;
+    if (target) target.setAttribute("aria-invalid", "true");
+    // A removal the helper refused leaves the key as it was.
+    const runtime = runtimeOf(selected);
+    if (keyAction[`${runtime}:${selected}`] === "remove") {
+      delete keyAction[`${runtime}:${selected}`];
+      const message = $("save-result").textContent;
+      renderAfterSave();
+      showResult("save-result", "error", message);
     }
   }
 
-  async function save(event) {
-    event.preventDefault();
+  // Settings save themselves: a change to a field saves when the field is
+  // left (the browser's "change"), a choice, an add, a remove or a toggle
+  // saves at once. Saves run one at a time, and one asked for during another
+  // runs right after it, so the last word wins. Only the prompts have a
+  // button of their own, since saving one starts a new conversation.
+  let saveTimer = null;
+  let saving = false;
+  let saveAgain = false;
+
+  function saveSoon(delay = 300) {
+    clearTimeout(saveTimer);
+    if (!catalog || !selected) return;
+    saveTimer = setTimeout(autoSave, delay);
+  }
+
+  async function autoSave() {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    if (saving) {
+      saveAgain = true;
+      return;
+    }
+    // Waiting for the helper: the form is dimmed and changes are kept
+    // in the draft until it runs (the page saves them then).
+    if (!usable(selected)) {
+      saveWaiting = true;
+      return;
+    }
+    // A provider that needs a key is not saved until it has one, so adding
+    // it or choosing where it runs shows what is missing, not an error.
+    if (keyMissing(selected)) {
+      showResult("save-result", "", `Enter the ${catalog[selected].label} API key to start using it.`);
+      return;
+    }
+    saving = true;
+    try {
+      await save();
+    } finally {
+      saving = false;
+    }
+    if (saveAgain) {
+      saveAgain = false;
+      saveSoon(0);
+    }
+  }
+
+  // The provider needs a key that is neither saved nor typed.
+  function keyMissing(id) {
+    if (!catalog[id].requires.includes("apiKey")) return false;
+    const info = infoFor(id);
+    const typed = $(`${id}-apiKey`);
+    return !(info && info.hasKey) && !(typed && typed.value.trim());
+  }
+
+  // The page is going away with a change not yet saved: save it now.
+  function flushSave() {
+    if (saveTimer && usable(selected)) autoSave();
+  }
+
+  function showNotAllowed(pattern) {
+    const host = pattern.replace(/\/\*$/, "");
+    showResult("save-result", "error", `Not saved: the browser has not allowed the extension to reach ${host}. `);
+    $("save-result").appendChild(h("button", { type: "button", class: "btn", id: "allow-save", text: "Allow and save", onclick: () => autoSave() }));
+  }
+
+  async function save() {
     // A name still being typed is part of what is saved.
     if (commitRename()) renderProfiles();
     const inBrowser = runtimeOf(selected) === "extension";
     const pattern = inBrowser ? originPatternFor(selected) : null;
+    // Asked first. Right after the student's last click or key press the
+    // browser may still show its prompt; with the access already granted it
+    // never does.
     const allowed = inBrowser ? requestPermission(pattern) : Promise.resolve(true);
-    const button = $("save");
-    button.disabled = true;
-    pendingChoiceNote = null;
     showResult("save-result", "", "Saving...");
     const plan = profilesForSave();
     if (inBrowser) {
       const patch = extensionPatch(plan);
       if (!(await allowed)) {
-        button.disabled = false;
-        showResult("save-result", "error", deniedMessage(pattern));
+        showNotAllowed(pattern);
         return;
       }
       const res = await worker("lc-tutor:settings-save", { patch });
-      button.disabled = false;
       if (!res.ok) {
         failSave(res.error);
         return;
@@ -1591,14 +1690,13 @@
       ext = res.result;
       loadDraft(ext.settings);
       profilesNote(null, "");
-      render();
+      renderAfterSave();
       showResult("save-result", "ok", `Saved. The tutor now runs in the browser with ${activeLabel(ext.active)}.`);
       syncHelperProfiles(plan);
       return;
     }
     const res = await rpcStarting("save", { patch: helperPatch(plan) }, undefined, (t) => showResult("save-result", "", t));
     if (!res.ok) {
-      button.disabled = false;
       failSave(res.error);
       return;
     }
@@ -1607,7 +1705,6 @@
     // captures and the Tutor panel go to the relay.
     const provider = helper.settings.provider;
     const routed = await worker("lc-tutor:settings-save", { patch: { provider, runtime: "helper", ...plan } });
-    button.disabled = false;
     if (routed.ok) {
       ext = routed.result;
       loadDraft(ext.settings);
@@ -1615,12 +1712,36 @@
     }
     forgetKeyActions("helper");
     selected = provider;
-    render();
+    renderAfterSave();
     if (!routed.ok) {
       showResult("save-result", "error", `Saved in the helper, but the extension could not switch to it: ${routed.error.message}`);
       return;
     }
     showResult("save-result", "ok", `Saved. The tutor now uses ${activeLabel(helper.active)}.`);
+  }
+
+  // Redraws from what was saved, but keeps what is being typed in another
+  // field (a save from one field's "change" lands while the next is open).
+  function renderAfterSave() {
+    const active = document.activeElement;
+    const typing = active && active.closest && active.closest("#providers, #behavior") && active.id ? active : null;
+    const keep = {};
+    if (typing) {
+      for (const el of document.querySelectorAll("#providers input[id], #providers select[id], #behavior input[id]")) {
+        // A key that was saved is shown as saved; one being typed stays.
+        if (/-apiKey$/.test(el.id) && el !== active) continue;
+        keep[el.id] = el.type === "checkbox" ? el.checked : el.value;
+      }
+    }
+    render();
+    for (const [id, value] of Object.entries(keep)) {
+      const el = $(id);
+      if (!el || el.disabled) continue;
+      if (el.type === "checkbox") el.checked = value;
+      else if (el.tagName === "SELECT") {
+        if ([...el.options].some((o) => o.value === value)) el.value = value;
+      } else el.value = value;
+    }
   }
 
   function forgetKeyActions(runtime) {
@@ -1842,14 +1963,13 @@
     selected = ext.settings.provider;
     const helperFirst = rpc("get", {});
     // The extension restarted to finish the helper's setup: the form shows
-    // again what it showed before, still unsaved.
+    // again what it showed before, and the choice is saved once it can be.
     const resume = await takeResume();
     if (resume && resume.provider && catalog[resume.provider]) {
       selected = resume.provider;
       if (resume.runtime && runtimesOf(selected).includes(resume.runtime)) runtimeChoice[selected] = resume.runtime;
       if (resume.model) formModel[selected] = resume.model;
       render();
-      pendingChoiceNote = `${catalog[selected].label} is chosen but not saved yet. Press Save.`;
       render();
       const res2 = await helperFirst;
       if (res2.ok) {
@@ -1859,6 +1979,8 @@
         helperOffline = res2.error.offline || "relay-down";
       }
       render();
+      // The choice made before the restart is saved now.
+      saveSoon(0);
       return;
     }
     if (!selected) {
@@ -1907,17 +2029,20 @@
     if (document.visibilityState === "visible" && catalog && selected && runtimeOf(selected) === "helper") refreshAttention();
     if (document.visibilityState === "visible") refreshPromptTags();
   });
-  // Typing, choosing and toggling anywhere in the form but the Helper card
-  // (setting up the helper changes nothing that Save saves).
-  for (const type of ["input", "change"]) {
-    $("form").addEventListener(type, (e) => {
-      if (!(e.target instanceof Element) || !e.target.closest("#helper-card")) formChanged();
-    });
-  }
-  window.addEventListener("pageshow", (e) => {
-    if (e.persisted) formChanged();
+  // A field of the selected model's provider or an Advanced option saves when
+  // it is left or chosen. (The add row, the Helper card and the prompts are
+  // not saved this way.) The saved note goes as soon as something changes.
+  $("form").addEventListener("change", (e) => {
+    if (!(e.target instanceof Element) || !e.target.closest("#providers, #behavior")) return;
+    if ($("save-result").getAttribute("data-kind") === "ok") showResult("save-result", "", "");
+    saveSoon();
   });
-  $("form").addEventListener("submit", save);
+  $("form").addEventListener("submit", (e) => e.preventDefault());
+  // Leaving with a change waiting for its save: save it now.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushSave();
+  });
+  window.addEventListener("pagehide", flushSave);
   $("test").addEventListener("click", runTest);
   load();
 })();

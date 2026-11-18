@@ -85,7 +85,8 @@ try {
   await options.type('#local-baseUrl', modelUrl);
   await options.eval(`(() => { const s = document.getElementById('local-model'); s.value = '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await options.type('#local-model', 'stub-model');
-  await options.click('#save');
+  // Leaving the field saves it (the page has no Save button).
+  await options.eval(`document.getElementById('local-model').dispatchEvent(new Event('change', { bubbles: true }))`);
   await options.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the save' });
   options.close();
 

@@ -157,7 +157,7 @@ try {
     const options = await openOptions(browser);
     allPages.push(options);
     await options.waitFor(`document.getElementById('connection-text').textContent === 'Not set up'`, { what: '"Not set up"' });
-    check((await options.eval(`document.querySelector('input[name=provider]:checked').value`)) === 'local', 'Local model is not the first choice');
+    check(/^Local model settings/.test(await options.eval(`document.querySelector('#providers .provider-title').textContent`)), 'Local model is not the first choice');
     const providers = await options.eval(`document.getElementById('providers').textContent`);
     check(providers.includes(`OLLAMA_ORIGINS=chrome-extension://${browser.extensionId}`), 'the hint does not carry this extension id');
     await options.screenshot(path.join(shots, 'options-first-run-dark.png'), { width: 1280, height: 900 });
@@ -265,8 +265,21 @@ async function testWith(options, setup) {
   await options.waitFor(`['ok', 'error'].includes(document.getElementById('test-result').getAttribute('data-kind'))`, { what: 'the connection test', timeout: 30000 });
   return testResult(options);
 }
+// Picks a provider the way the page now offers it: adds a model for it
+// (it becomes the default and its settings show below the list).
+async function useProvider(options, provider, model = '') {
+  if (await options.eval(`!document.getElementById('add-provider')`)) await options.click('#add-toggle');
+  await options.eval(`(() => { const s = document.getElementById('add-provider'); s.value = ${JSON.stringify(provider)}; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  if (model) {
+    await options.eval(`(() => {
+      const s = document.getElementById('add-model');
+      if (s.tagName === 'SELECT') { s.value = [...s.options].some((o) => o.value === ${JSON.stringify(model)}) ? ${JSON.stringify(model)} : '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); }
+      if (document.getElementById('add-model').tagName === 'INPUT') document.getElementById('add-model').value = ${JSON.stringify(model)};
+    })()`);
+  }
+  await options.click('#add-profile-button');
+}
 async function pickLocal(options, baseUrl) {
-  await options.click('input[name=provider][value=local]');
   await options.type('#local-baseUrl', baseUrl);
   await options.eval(`(() => { const s = document.getElementById('local-model'); if (s.tagName === 'SELECT') { s.value = '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); } })()`);
   await options.type('#local-model', 'llama3.2');
@@ -299,7 +312,7 @@ try {
     const s = await stub(401, { error: { message: 'Incorrect API key provided: sk-bad. You can find your API key at https://platform.openai.com/account/api-keys.', type: 'invalid_request_error', code: 'invalid_api_key' } });
     try {
       const r = await testWith(options, async () => {
-        await options.click('input[name=provider][value=openai]');
+        await useProvider(options, 'openai', 'gpt-5-mini');
         await options.type('#openai-apiKey', 'sk-bad');
         await options.type('#openai-baseUrl', s.url);
         await options.type('#openai-model', 'gpt-5-mini');
@@ -336,7 +349,7 @@ try {
     await pause(300);
     try {
       const r = await testWith(options, async () => {
-        await options.click('input[name=provider][value=anthropic]');
+        await useProvider(options, 'anthropic');
         await options.type('#anthropic-apiKey', 'sk-ant-bad');
       });
       check(seen.length > 0, 'nothing reached api.anthropic.com');
@@ -348,18 +361,18 @@ try {
   });
 
   await scenario('a subscription provider without the helper: the page points to the Helper section, which asks for the permission first', async () => {
-    await options.click('input[name=provider][value=claude]');
+    await useProvider(options, 'claude');
     await options.waitFor(`!document.getElementById('offline').hidden`, { what: 'the offline note' });
     const seen = await options.eval(`({
       offline: document.getElementById('offline').textContent,
       helperHidden: document.getElementById('helper-card').hidden,
       helper: document.getElementById('helper-card').textContent,
       allow: !!document.getElementById('helper-permission'),
-      saveDisabled: document.getElementById('save').disabled,
+      waiting: document.getElementById('form').hasAttribute('data-disabled'),
     })`);
     check(/Set it up in the Helper section below/.test(seen.offline), `offline note: ${seen.offline}`);
     check(!seen.helperHidden && seen.allow && /needs Node/.test(seen.helper), `helper section: ${seen.helper}`);
-    check(seen.saveDisabled, 'Save is enabled with nothing to save to');
+    check(seen.waiting, 'the form is not waiting for the helper');
     await options.screenshot(path.join(shots, 'subscription-no-helper-dark.png'), { width: 1280, height: 1300 });
   });
 

@@ -123,7 +123,7 @@ export function createSettingsRpc(deps) {
     const stored = deps.getStored();
     const profile = typeof id === 'string' && PROFILE_ID_RE.test(id) ? findProfile(stored.profiles, id) : null;
     if (!profile) {
-      throw Object.assign(new SettingsError('The helper app does not have that model saved. Open Manage models and press Save.', 'profile'), { code: 'unknown' });
+      throw Object.assign(new SettingsError('The helper app does not have that model saved. Open Settings and choose it there.', 'profile'), { code: 'unknown' });
     }
     const env = deps.env || {};
     if ((env.COMPANION_BACKEND && env.COMPANION_BACKEND !== profile.provider) || (env.COMPANION_MODEL && env.COMPANION_MODEL !== profile.model)) {

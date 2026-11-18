@@ -11,7 +11,9 @@
         "Made Sync from LeetCode turn red and read \"LeetCode not logged in\" when you are signed out, and showed when it last synced.",
         "Made removing the extension open a page with the one command that removes the helper, and made the helper uninstall clear its cached copy too.",
         "Added this Changelog tab, a badge on the toolbar icon and a card in the Tutor tab that appear after an update.",
-        "Tidied the Settings page: one Model section, then Prompts, Helper and a collapsed Advanced section."
+        "Tidied the Settings page: one Model section, then Prompts, Helper and a collapsed Advanced section.",
+        "Merged the two model lists in Settings into one: pick the model you want, and only its settings show below the list.",
+        "Made Settings save by themselves as you change them, so there is no Save button. The prompts still have their own Save, since saving one starts a new conversation."
       ]
     },
     {

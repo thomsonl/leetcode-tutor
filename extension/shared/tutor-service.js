@@ -128,7 +128,7 @@ export function createTutorService({
   function permissionMessage(current) {
     return (
       `The extension isn't allowed to reach ${serverUrlFor(current)} yet. ` +
-      'Open the extension options and press Save (or Test connection) to allow it.'
+      'Open the extension options and choose the model again (or press Test connection) to allow it.'
     );
   }
 

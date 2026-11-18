@@ -30,21 +30,16 @@
       <form id="form" novalidate>
         <section class="card" id="model-card" aria-labelledby="model-heading">
           <h2 id="model-heading">Model</h2>
-          <p class="help">What answers in the Tutor tab. A local model or an API key runs in the browser; the Claude and ChatGPT subscriptions need the helper app.</p>
+          <p class="help">The models the Tutor tab can use. The selected one answers now, and the Tutor tab's menu lists them all. A local model or an API key runs in the browser; the Claude and ChatGPT subscriptions need the helper app.</p>
+          <div id="profiles" class="profiles" role="radiogroup" aria-label="Default model"></div>
+          <div class="add-profile" id="add-profile"></div>
+          <p id="profiles-note" class="hint" role="status" aria-live="polite"></p>
           <fieldset id="providers" class="providers">
-            <legend class="sr-only">Provider</legend>
+            <legend class="sr-only">Selected model</legend>
           </fieldset>
           <div class="actions">
             <button type="button" id="test" class="btn">Test connection</button>
             <span id="test-result" class="result" role="status" aria-live="polite"></span>
-          </div>
-
-          <div class="subsection" id="models-section" aria-labelledby="models-heading">
-            <h3 id="models-heading">Models in the Tutor tab</h3>
-            <p class="help">The Tutor tab's model menu lists these. The default is what the tutor uses now. The connection settings above apply to every model of that provider.</p>
-            <div id="profiles" class="profiles" role="radiogroup" aria-label="Default model"></div>
-            <div class="add-profile" id="add-profile"></div>
-            <p id="profiles-note" class="hint" role="status" aria-live="polite"></p>
           </div>
         </section>
 
@@ -54,9 +49,8 @@
         </details>
 
         <div class="savebar">
-          <p id="wait-note" class="result wait-note" hidden>Waiting for the helper app. You can save once it runs.</p>
+          <p id="wait-note" class="result wait-note" hidden>Waiting for the helper app. Changes save once it runs.</p>
           <p id="save-result" class="result" role="status" aria-live="polite"></p>
-          <button type="submit" id="save" class="btn primary">Save</button>
         </div>
       </form>
 

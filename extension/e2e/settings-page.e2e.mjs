@@ -93,13 +93,15 @@ function companion({ env = {}, stored = emptySettings(), models = ['gpt-oss:20b'
   };
 }
 
-const copy = extensionCopy(extensionDir, { extraHosts: ['http://127.0.0.1/*', 'https://api.anthropic.com/*'] });
+const copy = extensionCopy(extensionDir, { extraHosts: ['http://127.0.0.1/*', 'http://localhost/*', 'https://api.anthropic.com/*'] });
 let browser = null;
 let failures = 0;
 
 // `mock` answers the relay; null means no relay at all (every request to it
 // fails).
 async function scenario(name, mock, run) {
+  // LC_E2E_ONLY=<regex> runs only the scenarios whose name matches.
+  if (process.env.LC_E2E_ONLY && !new RegExp(process.env.LC_E2E_ONLY).test(name)) return;
   browser = await launch({ extensionDir: copy.dir });
   const page = await browser.openPage('about:blank');
   try {
@@ -114,7 +116,7 @@ async function scenario(name, mock, run) {
     console.log(`PASS  ${name}`);
   } catch (err) {
     failures += 1;
-    console.log(`FAIL  ${name}\n      ${err.stack.split('\n').slice(0, 4).join('\n      ')}`);
+    console.log(`FAIL  ${name}\n      ${err.stack.split("\n").slice(0, 14).join('\n      ')}`);
     await page.screenshot(path.join(shots, `FAIL-${name.replace(/\W+/g, '-')}.png`)).catch(() => {});
   } finally {
     page.close();
@@ -134,13 +136,63 @@ const pickLocalModel = async (page, name) => {
     s.value = has ? ${JSON.stringify(name)} : '__other__';
     s.dispatchEvent(new Event('change', { bubbles: true }));
   })()`);
-  if (await page.eval(`document.getElementById('local-model').tagName === 'INPUT'`)) await page.type('#local-model', name);
+  if (await page.eval(`document.getElementById('local-model').tagName === 'INPUT'`)) {
+    await page.type('#local-model', name);
+    // Leaving the box is what saves the name, as it is for a student.
+    await leave(page, '#local-model');
+  }
 };
 const value = (page, selector) => page.eval(`document.querySelector(${JSON.stringify(selector)}).value`);
 const lastCall = (page, method) => [...page.mockedRequests].reverse().find((r) => r.body && r.body.method === method);
+// Settings save themselves. A student edits a field and leaves it, which is
+// the browser's "change" event; a test that set a value from a script sends
+// that event itself.
+const leave = (page, selector) => page.eval(`document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new Event('change', { bubbles: true }))`);
+const SAVED = `document.getElementById('save-result').textContent.startsWith('Saved')`;
+// The page's own save is what runs; this waits for its answer.
+const savedCalls = (page, method) => page.mockedRequests.filter((r) => r.body && r.body.method === method).length;
+// Picks a provider the way a student now does: adds a model for it, which
+// becomes the default and shows that provider's settings.
+const openAdd = async (page) => {
+  if (await page.eval(`!document.getElementById('add-provider')`)) await page.click('#add-toggle');
+};
+const useProvider = async (page, provider, model = '') => {
+  await openAdd(page);
+  await page.eval(`(() => { const s = document.getElementById('add-provider'); s.value = ${JSON.stringify(provider)}; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  if (model) {
+    // A dropdown without that name takes it through "Other".
+    await page.eval(`(() => {
+      const s = document.getElementById('add-model');
+      if (s.tagName === 'SELECT') {
+        s.value = [...s.options].some((o) => o.value === ${JSON.stringify(model)}) ? ${JSON.stringify(model)} : '__other__';
+        s.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      if (document.getElementById('add-model').tagName === 'INPUT') document.getElementById('add-model').value = ${JSON.stringify(model)};
+    })()`);
+  }
+  await page.click('#add-profile-button');
+};
+// A real mouse click (press and release at the element's middle), so focus
+// moves and blur fires as for a user; page.click only calls click().
+const mouseClick = async (page, selector) => {
+  const c = await page.eval(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  for (const type of ['mousePressed', 'mouseReleased']) {
+    await page.send('Input.dispatchMouseEvent', { type, x: c.x, y: c.y, button: 'left', clickCount: 1 });
+  }
+};
+// Waits in the test process (for what the page sent to the scripted helper).
+const until = async (check, what, ms = 10000) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (check()) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+};
+const selectedProvider = (page) => page.eval(`(document.querySelector('#providers .provider-title') || {}).textContent`);
 
 await scenario('first run shows the historic default (Claude subscription) and the running provider', companion(), async (page) => {
-  assert.equal(await page.eval(`document.querySelector('input[name=provider]:checked').value`), 'claude');
+  assert.equal(await selectedProvider(page), 'Claude subscription settings');
   // The page carries the store name (the manifest's), in its heading and tab title.
   assert.equal(await text(page, 'h1'), "Thomson's LeetCode Tutor");
   assert.equal(await page.eval('document.title'), "Thomson's LeetCode Tutor settings");
@@ -148,7 +200,10 @@ await scenario('first run shows the historic default (Claude subscription) and t
   // the form starts on, but the header must not call it a saved choice.
   assert.match(await text(page, '#connection-text'), /^Not saved yet: Claude subscription/);
   assert.equal(await page.eval(`document.getElementById('connection').hasAttribute('data-ok')`), false);
-  assert.equal(await page.eval(`document.querySelectorAll('input[name=provider]').length`), 5);
+  assert.equal(await page.eval(`document.querySelectorAll('#providers .provider').length`), 1, 'only the selected model\'s settings are drawn');
+  assert.equal(await page.eval(`document.getElementById('save')`), null, 'there is no Save button');
+  assert.equal(await page.eval(`document.getElementById('models-section')`), null, 'and no second card for the Tutor tab models');
+  assert.equal(await page.eval(`getComputedStyle(document.querySelector('.savebar')).display`), 'none', 'the status bar is not there while it has nothing to say');
   assert.match(await text(page, '#path'), /settings\.json/);
   await page.screenshot(path.join(shots, 'first-run-dark.png'), { scheme: 'dark' });
   await page.screenshot(path.join(shots, 'first-run-light.png'), { scheme: 'light' });
@@ -173,8 +228,10 @@ await scenario('a saved local model fills the form, and "Find models" suggests w
 
 await scenario('typing an API key tests and saves it, sends only the chosen provider, and never shows it back', companion(), async (page) => {
   const secret = 'sk-ant-TYPED-SECRET-1234567890';
-  await page.click('input[name=provider][value=anthropic]');
+  await useProvider(page, 'anthropic');
   await page.click('#anthropic-runtime-helper');
+  await page.waitFor(`/Enter the Anthropic API key/.test(document.getElementById('save-result').textContent)`, { what: 'the note that the key is missing' });
+  assert.equal(savedCalls(page, 'save'), 0, 'nothing is saved before the key is there');
   await page.type('#anthropic-apiKey', secret);
   assert.equal(await page.eval(`document.getElementById('anthropic-apiKey').type`), 'password');
   await page.click('#test');
@@ -183,8 +240,8 @@ await scenario('typing an API key tests and saves it, sends only the chosen prov
   assert.equal(tested.provider, 'anthropic');
   assert.equal(tested.providers.anthropic.apiKey, secret);
   assert.deepEqual(Object.keys(tested.providers), ['anthropic'], 'only the selected provider is sent');
-  await page.click('#save');
-  await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'save confirmation' });
+  await leave(page, '#anthropic-apiKey');
+  await page.waitFor(SAVED, { what: 'save confirmation' });
   assert.match(await text(page, '#save-result'), /Anthropic API key/);
   assert.match(await text(page, '#connection-text'), /Tutor running: Anthropic API key/);
   // After saving, the page knows a key exists but is never given it.
@@ -202,10 +259,10 @@ await scenario('a saved key can be replaced or removed; an environment key is sh
   stored: applyPatch(emptySettings(), { provider: 'anthropic', providers: { anthropic: { apiKey: 'sk-ant-saved-key-9999' } } }),
 }), async (page) => {
   assert.match(await text(page, '#providers'), /A key is saved/);
+  // Removing saves at once; the helper here refuses a provider with no key,
+  // and the removal is still what was sent.
   await page.eval(`[...document.querySelectorAll('.linkbtn')].find((b) => b.textContent === 'Remove').click()`);
-  assert.match(await text(page, '#providers'), /will be removed when you save/);
-  await page.click('#save');
-  await page.waitFor(SAVE_DONE);
+  await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Not saved')`, { what: 'the refusal' });
   assert.equal(lastCall(page, 'save').body.params.patch.providers.anthropic.apiKey, null, 'a removal is sent as null');
 });
 
@@ -225,12 +282,11 @@ await scenario('environment variables lock their fields and are never sent back 
   assert.equal(await value(page, '#local-model'), 'saved-model', 'the saved value is shown');
   assert.equal(await page.eval(`document.getElementById('local-model').disabled`), true);
   assert.match(await text(page, '#providers'), /Set by COMPANION_MODEL in your environment/);
-  // The helper's provider is pinned; the ones that can run in the browser
-  // stay choosable, since the environment only pins the helper.
-  assert.equal(await page.eval(`[...document.querySelectorAll('input[name=provider]')].filter((r) => !r.disabled).map((r) => r.value).join()`), 'local,anthropic,openai', 'the helper provider is pinned');
   assert.equal(await page.eval(`document.getElementById('local-runtime-helper').checked`), true, 'an existing helper setup stays on the helper');
   assert.equal(await page.eval(`document.getElementById('vaultAutoSummary').disabled`), true);
-  await page.click('#save');
+  // The locked option is not editable, so the change that saves is another field's.
+  await page.type('#local-contextTokens', '16384');
+  await leave(page, '#local-contextTokens');
   await page.waitFor(SAVE_DONE);
   const patch = lastCall(page, 'save').body.params.patch;
   assert.equal(patch.provider, undefined, 'a locked provider is not sent');
@@ -239,18 +295,18 @@ await scenario('environment variables lock their fields and are never sent back 
   await page.screenshot(path.join(shots, 'locked-dark.png'), { scheme: 'dark' });
 });
 
-await scenario('a refused save shows the reason and focuses the offending field', companion({ saveError: { message: 'model can\'t be empty', field: 'model' } }), async (page) => {
-  await page.click('input[name=provider][value=local]');
+await scenario('a refused save shows the reason, marks the offending field and leaves focus alone', companion({ saveError: { message: 'model can\'t be empty', field: 'model' } }), async (page) => {
+  await useProvider(page, 'local', 'qwen3:8b');
   await page.click('#local-runtime-helper');
-  await page.click('#save');
-  await page.waitFor(SAVE_DONE);
-  assert.equal(await text(page, '#save-result'), 'Model can\'t be empty');
+  await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Not saved')`);
+  assert.equal(await text(page, '#save-result'), 'Not saved. Model can\'t be empty');
   assert.equal(await page.eval(`document.getElementById('save-result').getAttribute('data-kind')`), 'error');
-  assert.equal(await page.eval(`document.activeElement && document.activeElement.id`), 'local-model');
+  assert.equal(await page.eval(`document.getElementById('local-model').getAttribute('aria-invalid')`), 'true');
+  assert.notEqual(await page.eval(`document.activeElement && document.activeElement.id`), 'local-model', 'focus is not pulled away from what is being typed');
 });
 
 await scenario('a failing connection test is reported as an error, not as success', companion({ testResult: { ok: false, message: 'ChatGPT sign-in: not logged in. Run "codex login".' } }), async (page) => {
-  await page.click('input[name=provider][value=chatgpt]');
+  await useProvider(page, 'chatgpt');
   assert.match(await text(page, '#providers'), /Experimental/);
   await page.click('#test');
   await page.waitFor(`document.getElementById('test-result').textContent.includes('codex login')`);
@@ -281,8 +337,8 @@ await scenario('a failing connection test is reported as an error, not as succes
   });
 }
 
-await scenario('layout: Test connection keeps its width beside a long message, and the Save bar hides what scrolls under it', null, async (page) => {
-  await page.click('input[name=provider][value=claude]');
+await scenario('layout: Test connection keeps its width beside a long message, and the status bar hides what scrolls under it', null, async (page) => {
+  await useProvider(page, 'claude');
   await page.waitFor(`!document.getElementById('helper-card').hidden`, { what: 'the Helper section' });
   await page.send('Emulation.setDeviceMetricsOverride', { width: 900, height: 700, deviceScaleFactor: 1, mobile: false });
   const size = () => page.eval(`(() => { const r = document.getElementById('test').getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; })()`);
@@ -291,59 +347,50 @@ await scenario('layout: Test connection keeps its width beside a long message, a
   const after = await size();
   assert.deepEqual(after, before, 'the button kept its one-line size');
   assert.equal(after.h, 32);
-  // The Test connection button scrolled to where the bar floats: the bar
-  // covers it (nothing shows through next to Save). The Helper card is
-  // outside the form, below it, so the bar never floats over that one.
+  // The status bar at the foot is there only while it has a message; with
+  // one, it floats over what scrolls under it (nothing shows through).
+  await page.eval(`(() => { const r = document.getElementById('save-result'); r.textContent = 'Saved. The tutor now uses Claude subscription.'; r.setAttribute('data-kind', 'ok'); })()`);
+  assert.notEqual(await page.eval(`getComputedStyle(document.querySelector('.savebar')).display`), 'none', 'the bar shows with a message');
   await page.eval(`(() => { const r = document.getElementById('test').getBoundingClientRect(); window.scrollBy(0, r.top + r.height / 2 - (innerHeight - 28)); })()`);
-  // (Hit testing skips the bar while the form is greyed out, so it takes
-  // pointer events for the probe only.)
-  const hit = await page.eval(`(() => {
-    const bar = document.querySelector('.savebar');
-    bar.style.pointerEvents = 'auto';
-    const r = document.getElementById('test').getBoundingClientRect();
-    const el = document.elementFromPoint(r.left + 4, r.top + r.height / 2);
-    bar.style.pointerEvents = '';
-    return { inBar: Boolean(el && el.closest('.savebar')), bg: getComputedStyle(bar).backgroundColor, opacity: getComputedStyle(bar).opacity };
-  })()`);
-  assert.equal(hit.inBar, true, JSON.stringify(hit));
-  assert.equal(hit.opacity, '1', JSON.stringify(hit));
-  assert.doesNotMatch(hit.bg, /rgba\(.*, 0\)|transparent/, JSON.stringify(hit));
-  await page.screenshot(path.join(shots, 'savebar-over-helper.png'), { scheme: 'dark', width: 900, height: 700 });
+  const bg = await page.eval(`getComputedStyle(document.querySelector('.savebar')).backgroundColor`);
+  assert.doesNotMatch(bg, /rgba\(.*, 0\)|transparent/, bg);
+  await page.screenshot(path.join(shots, 'status-bar-over-helper.png'), { scheme: 'dark', width: 900, height: 700 });
 });
 
 await scenario('behavior options round-trip', companion(), async (page) => {
   await page.eval(`document.getElementById('autoClearContext').click()`);
   await page.type('#localMaxHistoryTurns', '3');
-  await page.click('#save');
-  await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`);
+  await leave(page, '#localMaxHistoryTurns');
+  await until(() => lastCall(page, 'save') && lastCall(page, 'save').body.params.patch.options.localMaxHistoryTurns === 3, 'the saves');
+  await page.waitFor(SAVED);
   const options = lastCall(page, 'save').body.params.patch.options;
   assert.deepEqual(options, { autoClearContext: false, vaultAutoSummary: false, localMaxHistoryTurns: 3 });
   assert.equal(await page.eval(`document.getElementById('autoClearContext').checked`), false);
 });
 
-await scenario('"Saved" shows only right after a Save: any edit clears it, a reload never brings it back, an error stays', companion(), async (page) => {
+await scenario('settings save by themselves: a toggle saves at once, a field when it is left, and nothing else changes the note', companion(), async (page) => {
   const result = () => page.eval(`({ text: document.getElementById('save-result').textContent, kind: document.getElementById('save-result').getAttribute('data-kind') })`);
-  const saveNow = async () => {
-    await page.click('#save');
-    await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'Saved' });
-  };
-  // A toggle in Behavior.
-  await saveNow();
-  await page.screenshot(path.join(shots, 'saved-dark.png'), { scheme: 'dark' });
+  assert.deepEqual(await result(), { text: '', kind: null }, 'nothing to say on a fresh page');
+  assert.equal(savedCalls(page, 'save'), 0, 'opening the page saves nothing');
+  // A toggle in Advanced.
   await page.eval(`document.getElementById('autoClearContext').click()`);
-  assert.deepEqual(await result(), { text: '', kind: null });
-  // Typing in a field.
-  await saveNow();
+  await page.waitFor(SAVED, { what: 'the toggle saved' });
+  assert.equal(lastCall(page, 'save').body.params.patch.options.autoClearContext, false);
+  await page.screenshot(path.join(shots, 'saved-dark.png'), { scheme: 'dark' });
+  // Typing alone saves nothing yet; leaving the field does.
+  const before = savedCalls(page, 'save');
   await page.type('#localMaxHistoryTurns', '4');
-  assert.deepEqual(await result(), { text: '', kind: null });
-  // A change in the models list (a button, no input event).
-  await saveNow();
-  const removed = await page.eval(`(() => { const b = document.querySelector('#profiles button[id$="-remove"]:not([disabled])'); if (b) b.click(); return Boolean(b); })()`);
-  assert.ok(removed, 'no model to remove');
-  assert.deepEqual(await result(), { text: '', kind: null });
-  // Setting up the helper changes nothing Save saves, so it keeps the note.
-  await saveNow();
+  await new Promise((r) => setTimeout(r, 700));
+  assert.equal(savedCalls(page, 'save'), before, 'typing alone does not save');
+  await leave(page, '#localMaxHistoryTurns');
+  await until(() => savedCalls(page, 'save') === before + 1, 'the field saved');
+  assert.equal(lastCall(page, 'save').body.params.patch.options.localMaxHistoryTurns, 4);
+  // Setting up the helper saves nothing and keeps the note.
+  await page.waitFor(SAVED);
+  const settled = savedCalls(page, 'save');
   await page.eval(`document.getElementById('helper-card').dispatchEvent(new Event('change', { bubbles: true }))`);
+  await new Promise((r) => setTimeout(r, 700));
+  assert.equal(savedCalls(page, 'save'), settled);
   assert.match((await result()).text, /^Saved/);
   // A reload starts with no note.
   await page.send('Page.reload');
@@ -356,6 +403,16 @@ await scenario('"Saved" shows only right after a Save: any edit clears it, a rel
   assert.deepEqual(await result(), { text: 'The helper refused it.', kind: 'error' });
 });
 
+await scenario('two quick changes are saved one after the other, and the last one wins', companion(), async (page) => {
+  await page.eval(`document.getElementById('autoClearContext').click()`);
+  await page.type('#localMaxHistoryTurns', '7');
+  await leave(page, '#localMaxHistoryTurns');
+  await until(() => lastCall(page, 'save') && lastCall(page, 'save').body.params.patch.options.localMaxHistoryTurns === 7, 'the last change');
+  await page.waitFor(SAVED);
+  assert.equal(await page.eval(`document.getElementById('autoClearContext').checked`), false, 'the earlier toggle is still what was chosen');
+  assert.equal(await page.eval(`document.getElementById('localMaxHistoryTurns').value`), '7', 'and the typed number is kept');
+});
+
 for (const [status, pattern, kind] of [
   [503, /helper is running but the tutor behind it isn't/, 'tutor not running'],
   [404, /older version without settings support/, 'old relay'],
@@ -363,36 +420,41 @@ for (const [status, pattern, kind] of [
   await scenario(`offline: ${kind}`, companion({ httpStatus: status }), async (page) => {
     // With no helper, a fresh page starts on a local model in the browser,
     // which needs no helper: nothing is disabled and no warning shows.
-    assert.equal(await page.eval(`document.querySelector('input[name=provider]:checked').value`), 'local');
+    assert.equal(await selectedProvider(page), 'Local model settings');
     assert.equal(await page.eval(`document.getElementById('offline').hidden`), true);
-    assert.equal(await page.eval(`document.getElementById('save').disabled`), false);
-    await page.click('input[name=provider][value=claude]');
+    assert.equal(await page.eval(`document.getElementById('form').hasAttribute('data-disabled')`), false);
+    await useProvider(page, 'claude');
     assert.match(await text(page, '#offline'), pattern);
-    assert.equal(await page.eval(`document.getElementById('save').disabled`), true);
     assert.equal(await page.eval(`document.getElementById('form').hasAttribute('data-disabled')`), true);
+    assert.equal(savedCalls(page, 'save'), 0, 'nothing is saved while the helper is not there');
     await page.screenshot(path.join(shots, `offline-${status}-dark.png`), { scheme: 'dark' });
   });
 }
 
-await scenario('no helper at all: a subscription points to the Helper section, the form waits for it, and another provider can still be picked', null, async (page) => {
-  await page.click('input[name=provider][value=claude]');
+await scenario('no helper at all: a subscription points to the Helper section, the form waits for it, and another model can still be picked', null, async (page) => {
+  await useProvider(page, 'claude');
   await page.waitFor(`!document.getElementById('offline').hidden`, { what: 'the helper note' });
   const note = await text(page, '#offline');
   assert.match(note, /^Claude subscription runs through the helper app, which isn't set up or running yet\. Set it up in the Helper section below\./);
   // No terminal command to start the tutor is ever mentioned.
   assert.equal(await page.eval(`document.querySelectorAll('#offline .aside, #offline code').length`), 0);
   assert.doesNotMatch(note, /localhost:8135|companion\.js|leetcode`|terminal/);
-  assert.equal(await page.eval(`document.getElementById('save').disabled`), true);
   assert.equal(await page.eval(`document.getElementById('form').hasAttribute('data-disabled')`), true);
   assert.equal(await page.eval(`document.getElementById('wait-note').hidden`), false);
   assert.match(await text(page, '#wait-note'), /^Waiting for the helper app/);
   await page.eval(`document.getElementById('wait-note').scrollIntoView({ block: 'end' })`);
   await page.screenshot(path.join(shots, 'helper-missing-dark.png'), { scheme: 'dark' });
   await page.screenshot(path.join(shots, 'helper-missing-light.png'), { scheme: 'light' });
-  // A real mouse click (not a scripted one) still reaches another provider.
-  const at = await page.eval(`(() => { const r = document.querySelector('input[name=provider][value=local]'); r.scrollIntoView({ block: 'center' }); const b = r.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
-  for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: 1 });
-  await page.waitFor(`document.querySelector('input[name=provider][value=local]').checked`, { what: 'the local model chosen by a click' });
+  // Add a local model (the list's controls stay live while the helper is
+  // missing) and choose it with a real mouse click, not a scripted one.
+  const claudeRow = await page.eval(`document.querySelector('#profiles .profile[data-default]').dataset.id`);
+  await useProvider(page, 'local', 'qwen3:8b');
+  await page.waitFor(`document.querySelectorAll('#profiles .profile').length === 2`, { what: 'the two models' });
+  const localId = await page.eval(`[...document.querySelectorAll('#profiles .profile')].find((r) => r.dataset.id !== ${JSON.stringify(claudeRow)}).dataset.id`);
+  await page.eval(`document.getElementById('profile-${claudeRow}-radio').click()`);
+  await page.waitFor(`document.getElementById('form').hasAttribute('data-disabled')`, { what: 'the claude model back' });
+  await mouseClick(page, `#profile-${localId}-radio`);
+  await page.waitFor(`document.getElementById('profile-${localId}-radio').checked`, { what: 'the local model chosen by a click' });
   assert.equal(await page.eval(`document.getElementById('form').hasAttribute('data-disabled')`), false);
   assert.equal(await page.eval(`document.getElementById('wait-note').hidden`), true);
   assert.equal(await page.eval(`document.getElementById('offline').hidden`), true);
@@ -425,7 +487,7 @@ function stubServer({ status = 200 } = {}) {
 {
   const model = await stubServer();
   await scenario('browser runtime: with no helper, a local model is set up, tested and saved without the relay', null, async (page) => {
-    assert.equal(await page.eval(`document.querySelector('input[name=provider]:checked').value`), 'local');
+    assert.equal(await selectedProvider(page), 'Local model settings');
     assert.equal(await page.eval(`document.getElementById('local-runtime-extension').checked`), true);
     assert.equal(await text(page, '#connection-text'), 'Not set up');
     assert.equal(await page.eval(`document.getElementById('offline').hidden`), true, 'no helper warning');
@@ -441,8 +503,8 @@ function stubServer({ status = 200 } = {}) {
     const chat = model.requests.find((r) => /chat\/completions$/.test(r.url));
     assert.equal(chat.body.model, 'qwen3:8b');
     assert.match(chat.origin, /^chrome-extension:\/\//, 'the worker itself made the request');
-    await page.click('#save');
-    await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the save' });
+    // Choosing the model saved it, with no button to press.
+    await page.waitFor(SAVED, { what: 'the save', timeout: 20000 });
     assert.equal(await text(page, '#save-result'), 'Saved. The tutor now runs in the browser with Local model, qwen3:8b.');
     assert.equal(await text(page, '#connection-text'), 'Tutor running in the browser: Local model, qwen3:8b');
     const stored = await browser.serviceWorkerEval(`chrome.storage.local.get(null)`);
@@ -457,11 +519,11 @@ function stubServer({ status = 200 } = {}) {
 
 await scenario('browser runtime: an Anthropic key is saved in extension storage only, and never shown back', null, async (page) => {
   const secret = 'sk-ant-BROWSER-SECRET-0987654321';
-  await page.click('input[name=provider][value=anthropic]');
+  await useProvider(page, 'anthropic');
   assert.equal(await page.eval(`document.getElementById('anthropic-runtime-extension').checked`), true);
   await page.type('#anthropic-apiKey', secret);
-  await page.click('#save');
-  await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the save' });
+  await leave(page, '#anthropic-apiKey');
+  await page.waitFor(SAVED, { what: 'the save' });
   assert.match(await text(page, '#save-result'), /Anthropic API key, claude-opus-5-5/);
   assert.match(await text(page, '#providers'), /A key is saved/);
   assert.equal(await page.eval(`document.documentElement.outerHTML.includes(${JSON.stringify(secret)})`), false, 'the key is not in the page');
@@ -474,10 +536,10 @@ await scenario('browser runtime: an Anthropic key is saved in extension storage 
   assert.equal(await page.eval(`document.documentElement.outerHTML.includes(${JSON.stringify(secret)})`), false);
   // Remove it again.
   await page.eval(`[...document.querySelectorAll('.linkbtn')].find((b) => b.textContent === 'Remove').click()`);
-  await page.click('#save');
-  await page.waitFor(SAVE_DONE);
+  await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Not saved')`, { what: 'the refusal' });
   assert.equal(await page.eval(`document.getElementById('save-result').getAttribute('data-kind')`), 'error', 'the provider needs a key');
   assert.match(await text(page, '#save-result'), /needs an API key/);
+  assert.match(await text(page, '#providers'), /A key is saved/, 'a removal that was refused leaves the key shown as saved');
   await page.screenshot(path.join(shots, 'browser-anthropic-dark.png'), { scheme: 'dark' });
 });
 
@@ -485,10 +547,11 @@ await scenario('browser runtime: a denied permission prompt says what happened a
   await page.eval(`chrome.permissions.request = () => Promise.resolve(false)`);
   await page.type('#local-baseUrl', 'http://192.0.2.10:11434/v1');
   await pickLocalModel(page, 'llama3.2');
-  await page.click('#save');
-  await page.waitFor(SAVE_DONE);
+  await leave(page, '#local-model');
+  await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Not saved')`, { what: 'the refusal' });
   assert.equal(await page.eval(`document.getElementById('save-result').getAttribute('data-kind')`), 'error');
-  assert.equal(await text(page, '#save-result'), 'The browser did not allow the extension to reach http://192.0.2.10, so the tutor can\'t use it. Press the button again and choose Allow.');
+  assert.match(await text(page, '#save-result'), /^Not saved: the browser has not allowed the extension to reach http:\/\/192\.0\.2\.10\./);
+  assert.equal(await page.eval(`Boolean(document.getElementById('allow-save'))`), true, 'a button asks again, from a real click');
   const stored = await browser.serviceWorkerEval(`chrome.storage.local.get(null)`);
   assert.equal(stored.tutorSettings, undefined, 'nothing was saved');
   await page.click('#test');
@@ -534,14 +597,6 @@ const keyOn = async (page, selector, key) => {
   }
 };
 
-// A real mouse click (press and release at the element's middle), so focus
-// moves and blur fires as for a user; page.click only calls click().
-const mouseClick = async (page, selector) => {
-  const c = await page.eval(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
-  for (const type of ['mousePressed', 'mouseReleased']) {
-    await page.send('Input.dispatchMouseEvent', { type, x: c.x, y: c.y, button: 'left', clickCount: 1 });
-  }
-};
 const focusedId = (page) => page.eval(`document.activeElement ? document.activeElement.id : null`);
 
 {
@@ -551,18 +606,23 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
     await page.click('#local-find');
     await page.waitFor(`/Found 2/.test(document.getElementById('local-models-note').textContent)`, { what: 'model suggestions' });
     await pickLocalModel(page, 'qwen3:8b');
-    await page.click('#save');
-    await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the first save', timeout: 20000 });
+    await page.waitFor(SAVED, { what: 'the first save', timeout: 20000 });
     let rows = await profileRows(page);
     assert.deepEqual(rows.map((r) => [r.name, r.isDefault]), [['qwen3:8b', true]], 'the first save makes one default model');
     assert.equal(rows[0].meta, 'Local model · in the browser');
 
     // Add a second local model from the same dropdown of the server's models, with a name.
+    assert.equal(await page.eval(`document.getElementById('add-provider')`), null, 'the add row is behind a button once there is a model');
+    await openAdd(page);
     assert.equal(await page.eval(`document.getElementById('add-model').tagName`), 'SELECT', 'the add row reuses the model dropdown');
     await pickAddModel(page, 'gemma4:26b');
     await page.type('#add-label', 'Gemma');
     await page.click('#add-profile-button');
+    // A model added is used at once: it becomes the default and is saved.
+    await page.waitFor(`document.getElementById('connection-text').textContent.endsWith('gemma4:26b')`, { what: 'the added model saved and running', timeout: 20000 });
+    assert.equal(await value(page, '#local-model'), 'gemma4:26b', 'its settings show below the list');
     // A model the list already has is refused.
+    await openAdd(page);
     await pickAddModel(page, 'qwen3:8b');
     await page.click('#add-profile-button');
     assert.match(await text(page, '#profiles-note'), /already in the list/);
@@ -575,6 +635,14 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
     rows = await profileRows(page);
     assert.deepEqual(rows.map((r) => r.name), ['qwen3:8b', 'Gemma', 'claude-opus-5-5']);
     assert.equal(rows[1].meta, 'Local model · gemma4:26b · in the browser');
+    // The Anthropic model has no key yet, so it is not saved: the page says what is missing.
+    await page.waitFor(`/Enter the Anthropic API key/.test(document.getElementById('save-result').textContent)`, { what: 'the note that the key is missing' });
+    assert.equal((await browser.serviceWorkerEval(`chrome.storage.local.get(null)`)).tutorSettings.profiles.length, 2, 'and the saved list is unchanged');
+    // Removing it takes the default back to the row that took its place, which saves.
+    await page.click(`#profile-${rows[2].id}-remove`);
+    await page.waitFor(`document.getElementById('connection-text').textContent.endsWith('gemma4:26b') && !/Enter the/.test(document.getElementById('save-result').textContent)`, { what: 'the default back on Gemma', timeout: 20000 });
+    rows = await profileRows(page);
+    assert.deepEqual(rows.map((r) => [r.name, r.isDefault]), [['qwen3:8b', false], ['Gemma', true]]);
 
     // Rename with the keyboard: Enter keeps it, and focus returns to the rename button.
     const qwen = rows[0].id;
@@ -591,18 +659,19 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
     const gemma = rows[1].id;
     assert.equal(await page.eval(`document.getElementById('profile-${qwen}-up').disabled`), true, 'the first cannot move up');
     await page.click(`#profile-${gemma}-up`);
-    await page.click(`#profile-${rows[2].id}-remove`);
     rows = await profileRows(page);
     assert.deepEqual(rows.map((r) => r.name), ['Gemma', 'Qwen']);
     await page.screenshot(path.join(shots, 'models-card-dark.png'), { scheme: 'dark' });
     await page.screenshot(path.join(shots, 'models-card-light.png'), { scheme: 'light' });
     await page.screenshot(path.join(shots, 'models-card-narrow.png'), { scheme: 'dark', width: 420 });
 
-    // Choosing the default moves the provider card to that model.
+    // Choosing the default moves the settings below the list to that model, and saves.
+    await page.click(`#profile-${qwen}-radio`);
+    assert.equal(await value(page, '#local-model'), 'qwen3:8b');
+    await page.waitFor(`document.getElementById('connection-text').textContent.endsWith('qwen3:8b')`, { what: 'qwen saved as the default', timeout: 20000 });
     await page.click(`#profile-${gemma}-radio`);
     assert.equal(await value(page, '#local-model'), 'gemma4:26b');
-    await page.click('#save');
-    await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the save', timeout: 20000 });
+    await page.waitFor(`document.getElementById('connection-text').textContent.endsWith('gemma4:26b')`, { what: 'the save', timeout: 20000 });
     assert.equal(await text(page, '#connection-text'), 'Tutor running in the browser: Local model, gemma4:26b');
     const stored = await browser.serviceWorkerEval(`chrome.storage.local.get(null)`);
     assert.deepEqual(stored.tutorSettings.profiles.map((p) => [p.provider, p.model, p.label]), [['local', 'gemma4:26b', 'Gemma'], ['local', 'qwen3:8b', 'Qwen']]);
@@ -610,7 +679,6 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
     assert.equal(stored.tutorSettings.providers.local.model, 'gemma4:26b');
     // Editing the default's model in its card edits that entry.
     await pickLocalModel(page, 'qwen3:8b');
-    await page.click('#save');
     await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved') && document.getElementById('connection-text').textContent.endsWith('qwen3:8b')`, { what: 'the save of an existing model', timeout: 20000 });
     const again = await browser.serviceWorkerEval(`chrome.storage.local.get(null)`);
     assert.equal(again.tutorSettings.profiles.length, 2, 'picking a model already saved makes it the default, no duplicate');
@@ -623,28 +691,30 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
     assert.equal(await focusedId(page), `profile-${gemma}-label`, 'the other row\'s rename opened with one click');
     assert.equal((await profileRows(page)).find((r) => r.id === qwen).name, 'Qwen 3', 'the first name was kept');
     await page.type(`#profile-${gemma}-label`, 'Gemma 4');
-    await mouseClick(page, '#save');
-    await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved') && !document.querySelector('#profiles input[type=text]')`, { what: 'the save with a rename open', timeout: 20000 });
-    const named = await browser.serviceWorkerEval(`chrome.storage.local.get(null)`);
-    assert.deepEqual(named.tutorSettings.profiles.map((p) => p.label).sort(), ['Gemma 4', 'Qwen 3']);
+    // Clicking elsewhere leaves the field, which keeps the name and saves.
+    await mouseClick(page, '#model-heading');
+    await page.waitFor(`!document.querySelector('#profiles input[type=text]')`, { what: 'the rename closed', timeout: 20000 });
+    // The save lands a moment later; read the store until it has both names.
+    let labels = [];
+    for (let i = 0; i < 100; i += 1) {
+      const named = await browser.serviceWorkerEval(`chrome.storage.local.get(null)`);
+      labels = named.tutorSettings.profiles.map((p) => p.label).sort();
+      if (labels.join() === 'Gemma 4,Qwen 3') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.deepEqual(labels, ['Gemma 4', 'Qwen 3']);
     // Tab out of a rename keeps it too.
     await mouseClick(page, `#profile-${gemma}-rename`);
     await page.type(`#profile-${gemma}-label`, 'Gemma four');
-    await page.eval(`document.getElementById('add-provider').focus()`);
+    await page.eval(`document.getElementById('add-toggle').focus()`);
     assert.equal((await profileRows(page)).find((r) => r.id === gemma).name, 'Gemma four', 'leaving the field keeps the name');
-    assert.equal(await focusedId(page), 'add-provider', 'and focus stays where it went');
+    assert.equal(await focusedId(page), 'add-toggle', 'and focus stays where it went');
 
     // The keyboard keeps its place when a choice redraws the list or the cards.
     const order = (await profileRows(page)).map((r) => r.id);
     await keyOn(page, `#profile-${order[0]}-radio`, 'ArrowDown');
     assert.equal(await focusedId(page), `profile-${order[1]}-radio`, 'an arrow on the default radios moves focus with the choice');
     assert.equal((await profileRows(page)).find((r) => r.isDefault).id, order[1]);
-    const providerBefore = await page.eval(`document.querySelector('input[name=provider]:checked').id`);
-    await keyOn(page, `#${providerBefore}`, 'ArrowDown');
-    const providerAfter = await page.eval(`({ focused: document.activeElement.id, checked: document.querySelector('input[name=provider]:checked').id })`);
-    assert.notEqual(providerAfter.checked, providerBefore);
-    assert.equal(providerAfter.focused, providerAfter.checked, 'an arrow on the provider radios keeps focus on the chosen one');
-    await keyOn(page, `#${providerAfter.checked}`, 'ArrowUp');
     await mouseClick(page, `#profile-${order[0]}-remove`);
     assert.equal(await focusedId(page), `profile-${order[1]}-radio`, 'removing a row focuses the row that took its place');
     await mouseClick(page, `#profile-${order[1]}-remove`);
@@ -658,29 +728,30 @@ await scenario('models card: subscription models are kept by the helper too, and
 }), async (page) => {
   let rows = await profileRows(page);
   assert.deepEqual(rows.map((r) => [r.name, r.isDefault]), [['claude-haiku-5-5', true]], 'the old setting is one default model');
+  await openAdd(page);
   await page.eval(`(() => { const s = document.getElementById('add-provider'); s.value = 'claude'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   assert.deepEqual(await page.eval(`[...document.getElementById('add-model').options].map((o) => o.textContent)`), ['Default', 'Sonnet (latest)', 'Opus (latest)', 'Haiku (latest)', 'Other (type a name)...'], 'the Claude subscription offers its models in a dropdown');
   await page.eval(`(() => { const s = document.getElementById('add-model'); s.value = 'sonnet'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await page.type('#add-label', 'Sonnet');
   await page.click('#add-profile-button');
+  await openAdd(page);
   await page.eval(`(() => { const s = document.getElementById('add-provider'); s.value = 'local'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await page.eval(`(() => { const s = document.getElementById('add-model'); s.value = '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   assert.equal(await page.eval(`document.getElementById('add-model').tagName`), 'INPUT', '"Other" types a name in the add row');
-  assert.equal(await page.eval(`document.getElementById('local-model').tagName`), 'SELECT', 'and leaves the card\'s dropdown alone');
   await page.type('#add-model', 'llama3.2');
   await page.click('#add-profile-button');
   rows = await profileRows(page);
   assert.deepEqual(rows.map((r) => r.name), ['claude-haiku-5-5', 'Sonnet', 'llama3.2']);
   assert.match(rows[1].meta, /through the helper app/);
   assert.match(rows[2].meta, /in the browser/);
-  await page.click('#save');
-  await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'save confirmation' });
-  const patch = lastCall(page, 'save').body.params.patch;
-  assert.deepEqual(patch.profiles.map((p) => p.model), ['claude-haiku-5-5', 'sonnet'], 'only the helper\'s models go to the helper');
-  assert.equal(patch.activeProfile, rows[0].id);
+  // The adds saved themselves (two quick ones in one save) and the last one,
+  // the browser model, became the default; the helper is told only its own list.
+  await page.waitFor(`document.getElementById('connection-text').textContent.includes('llama3.2')`, { what: 'the browser model saved and running', timeout: 20000 });
+  await until(() => lastCall(page, 'setProfiles'), 'the helper to be told its list');
+  assert.deepEqual(lastCall(page, 'setProfiles').body.params.profiles.map((p) => p.model), ['claude-haiku-5-5', 'sonnet']);
   const stored = await browser.serviceWorkerEval(`chrome.storage.local.get(null)`);
   assert.deepEqual(stored.tutorSettings.profiles.map((p) => p.model), ['claude-haiku-5-5', 'sonnet', 'llama3.2'], 'the extension keeps the whole list');
-  assert.equal(stored.tutorSettings.activeProfile, rows[0].id);
+  assert.equal(stored.tutorSettings.activeProfile, rows[2].id);
   await page.screenshot(path.join(shots, 'models-card-helper-dark.png'), { scheme: 'dark' });
 });
 
@@ -724,6 +795,7 @@ function freePort() {
 }
 
 async function liveScenario(name, run) {
+  if (process.env.LC_E2E_ONLY && !new RegExp(process.env.LC_E2E_ONLY).test(name)) return;
   const modelA = await stubModel('A');
   const modelB = await stubModel('B');
   const port = await freePort();
@@ -769,7 +841,7 @@ async function liveScenario(name, run) {
     console.log(`PASS  ${name}`);
   } catch (err) {
     failures += 1;
-    console.log(`FAIL  ${name}\n      ${err.stack.split('\n').slice(0, 4).join('\n      ')}`);
+    console.log(`FAIL  ${name}\n      ${err.stack.split("\n").slice(0, 14).join('\n      ')}`);
     await page.screenshot(path.join(shots, `FAIL-${name.replace(/\W+/g, '-')}.png`)).catch(() => {});
   } finally {
     page.close();
@@ -787,15 +859,14 @@ await liveScenario('live: the page reads, tests and saves through the real relay
   const origins = new Set(page.redirectedRequests.map((r) => r.headers.Origin || r.headers.origin));
   assert.deepEqual([...origins], [`chrome-extension://${browser.extensionId}`], 'the page sends its extension origin');
   assert.equal(await value(page, '#local-model'), 'model-a');
-  await pickLocalModel(page, 'model-b');
+  // Both fields are filled before the first one is left, so the one save has both.
   await page.type('#local-baseUrl', live.modelB.url);
+  await pickLocalModel(page, 'model-b');
   await page.click('#test');
   await page.waitFor(`document.getElementById('test-result').textContent.includes('Connected')`, { what: 'the live connection test', timeout: 20000 });
   assert.equal(live.modelB.requests.length, 1, 'the test went to the draft model');
   assert.equal(live.modelB.requests[0].model, 'model-b');
-  assert.equal(JSON.parse(fs.readFileSync(live.settingsFile, 'utf8')).providers.local.model, 'model-a', 'a test saves nothing');
-  await page.click('#save');
-  await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the live save', timeout: 20000 });
+  await page.waitFor(SAVED, { what: 'the live save', timeout: 20000 });
   assert.match(await text(page, '#connection-text'), /Tutor running: Local model, model-b/);
   const saved = JSON.parse(fs.readFileSync(live.settingsFile, 'utf8'));
   assert.deepEqual([saved.provider, saved.providers.local.model, saved.providers.local.baseUrl], ['local', 'model-b', live.modelB.url]);
