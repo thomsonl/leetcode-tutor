@@ -8,12 +8,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HOST_NAME, GECKO_ID } from './config.js';
+import { HOST_NAME, GECKO_ID, VERSION } from './config.js';
 import { install, layout, npxCacheFolder, status, uninstall } from './install.js';
 import { parseArgs, run } from './cli.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
+
+test('the version install records and the helper reports is the package version', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(HERE, 'package.json'), 'utf8'));
+  assert.equal(VERSION, pkg.version, 'bump VERSION in config.js together with package.json');
+});
 const ID = 'abcdefghijklmnopabcdefghijklmnop';
 
 function tempHome(t) {
