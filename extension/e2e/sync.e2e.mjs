@@ -60,9 +60,9 @@ try {
   };
   const buttonState = () => options.eval(`(() => { const b = document.getElementById('sync-btn'); return { result: b.dataset.result || '', bg: getComputedStyle(b).backgroundColor, visibleNote: document.getElementById('sync-status').getBoundingClientRect().height > 1 }; })()`);
 
-  await scenario('the tabs read Progress then Settings', async () => {
+  await scenario('the tabs read Progress, Settings, Changelog', async () => {
     const tabs = await options.eval(`[...document.querySelectorAll('.tab')].map((t) => t.textContent).join()`);
-    check(tabs === 'Progress,Settings', tabs);
+    check(tabs === 'Progress,Settings,Changelog', tabs);
   });
 
   await scenario('with no LeetCode tab open the button says to open one', async () => {

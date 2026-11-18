@@ -29,8 +29,8 @@
 
       <form id="form" novalidate>
         <section class="card" id="model-card" aria-labelledby="model-heading">
-          <h2 id="model-heading">Tutor model</h2>
-          <p class="help">Choose what answers when you submit code or ask a question in the Tutor tab. A local model or an API key runs right in the browser; the Claude and ChatGPT subscriptions need the helper app.</p>
+          <h2 id="model-heading">Model</h2>
+          <p class="help">What answers in the Tutor tab. A local model or an API key runs in the browser; the Claude and ChatGPT subscriptions need the helper app.</p>
           <fieldset id="providers" class="providers">
             <legend class="sr-only">Provider</legend>
           </fieldset>
@@ -38,30 +38,20 @@
             <button type="button" id="test" class="btn">Test connection</button>
             <span id="test-result" class="result" role="status" aria-live="polite"></span>
           </div>
-        </section>
 
-        <section class="card" aria-labelledby="models-heading">
-          <h2 id="models-heading">Models in the Tutor tab</h2>
-          <p class="help">The model menu in the Tutor tab's header lists these, so you can switch with one click while you work. The default is what the tutor uses now; the provider settings above (server, key, where it runs) apply to every model of that provider. Changes take effect when you save.</p>
-          <div id="profiles" class="profiles" role="radiogroup" aria-label="Default model"></div>
-          <div class="add-profile" id="add-profile"></div>
-          <p id="profiles-note" class="hint" role="status" aria-live="polite"></p>
-        </section>
-
-        <section class="card" id="helper-card" aria-labelledby="helper-heading" hidden>
-          <div class="helper-head">
-            <h2 id="helper-heading">Helper</h2>
-            <p id="helper-state" class="connection" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="helper-state-text">Checking</span></p>
+          <div class="subsection" id="models-section" aria-labelledby="models-heading">
+            <h3 id="models-heading">Models in the Tutor tab</h3>
+            <p class="help">The Tutor tab's model menu lists these. The default is what the tutor uses now. The connection settings above apply to every model of that provider.</p>
+            <div id="profiles" class="profiles" role="radiogroup" aria-label="Default model"></div>
+            <div class="add-profile" id="add-profile"></div>
+            <p id="profiles-note" class="hint" role="status" aria-live="polite"></p>
           </div>
-          <p class="help">The Claude and ChatGPT subscriptions run through a small helper app on your computer, which needs Node. Once it is installed, the extension starts the tutor when you open a LeetCode problem and stops it 30 seconds after you close the last one.</p>
-          <div id="helper-body"></div>
-          <p id="helper-error" class="result" data-kind="error" role="alert" hidden></p>
         </section>
 
-        <section class="card" aria-labelledby="behavior-heading">
-          <h2 id="behavior-heading">Behavior</h2>
+        <details class="card" id="advanced-card">
+          <summary><h2 id="behavior-heading">Advanced</h2></summary>
           <div id="behavior"></div>
-        </section>
+        </details>
 
         <div class="savebar">
           <p id="wait-note" class="result wait-note" hidden>Waiting for the helper app. You can save once it runs.</p>
@@ -72,11 +62,22 @@
 
       <section class="card" id="prompts-card" aria-labelledby="prompts-heading" hidden>
         <h2 id="prompts-heading">Prompts</h2>
-        <p class="help">The instructions the tutor follows. Pick the one to edit, change it and save it. Reset to default brings the original back whenever you want it. Saving starts a new conversation in the Tutor tab. You switch between Tutor and Interviewer in the Tutor tab's header.</p>
+        <p class="help">The instructions the tutor follows. Saving starts a new conversation. Switch between Tutor and Interviewer in the Tutor tab's header.</p>
         <div id="prompts-body"></div>
       </section>
 
+      <section class="card" id="helper-card" aria-labelledby="helper-heading" hidden>
+        <div class="helper-head">
+          <h2 id="helper-heading">Helper</h2>
+          <p id="helper-state" class="connection" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="helper-state-text">Checking</span></p>
+        </div>
+        <p class="help">The Claude and ChatGPT subscriptions run through a small helper app that needs Node. The extension starts it when you open a LeetCode problem and stops it 30 seconds after you close the last one.</p>
+        <div id="helper-body"></div>
+        <p id="helper-error" class="result" data-kind="error" role="alert" hidden></p>
+      </section>
+
       <p id="foot" class="foot"></p>
+      <p id="version-line" class="foot"></p>
     </div>
 
     <div id="panel-progress" role="tabpanel" aria-labelledby="tab-progress" hidden></div>

@@ -156,6 +156,21 @@ input:disabled { opacity: 0.6; cursor: not-allowed; background: var(--fill); }
 
 .foot { color: var(--muted); font-size: 13px; line-height: 18px; }
 
+/* A second group inside one card (the saved models under the connection), set
+   off by a hairline and a smaller heading. */
+.subsection { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.subsection h3 { margin: 0 0 4px; font-size: 16px; line-height: 24px; font-weight: 600; }
+.subsection .help { margin-bottom: 12px; }
+
+/* Advanced: a card that stays one line until it is opened. */
+details.card > summary { list-style: none; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::before { content: ""; flex: none; width: 6px; height: 6px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.12s; margin: 0 4px 0 2px; }
+details.card[open] > summary::before { transform: rotate(45deg); }
+details.card > summary h2 { margin: 0; }
+details.card[open] > summary { margin-bottom: 12px; }
+details.card > summary:focus-visible { outline-offset: 6px; border-radius: 6px; }
+
 /* The Prompts card: two toggle tabs choose which prompt the editor shows,
    the chosen one filled, like the Tutor panel's own mode switch. */
 .prompt-tabs { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line-strong); border-radius: 8px; }
@@ -179,7 +194,7 @@ input:disabled { opacity: 0.6; cursor: not-allowed; background: var(--fill); }
 /* While a helper provider waits for the helper, what needs it is dimmed.
    The provider list stays usable (another provider may need no helper), the
    Helper card is how the helper gets set up, and the wait note says why. */
-form[data-disabled] .card:not(#helper-card):not(#model-card), form[data-disabled] #model-card .actions, form[data-disabled] #save, form[data-disabled] #save-result { opacity: 0.55; pointer-events: none; }
+form[data-disabled] .card:not(#helper-card):not(#model-card), form[data-disabled] #models-section, form[data-disabled] #model-card .actions, form[data-disabled] #save, form[data-disabled] #save-result { opacity: 0.55; pointer-events: none; }
 .savebar .wait-note { flex: none; color: var(--text); }
 .notice .aside { display: block; margin-top: 6px; color: var(--muted); font-size: 13px; }
 

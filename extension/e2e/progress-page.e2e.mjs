@@ -325,13 +325,23 @@ try {
 
   await scenario('the tab bar: arrow keys switch tabs, the address follows, the settings come back intact', async () => {
     await page.eval(`document.getElementById('tab-progress').focus()`);
-    await key(page, 'ArrowLeft');
+    await key(page, 'ArrowRight');
     const m = await page.eval(`({ hash: location.hash, focus: document.activeElement.id, settings: !document.getElementById('panel-settings').hidden, progress: document.getElementById('panel-progress').hidden, form: document.getElementById('form').getBoundingClientRect().height > 100, conn: getComputedStyle(document.getElementById('connection')).display, sub: document.getElementById('page-sub').textContent, tabindex: [document.getElementById('tab-settings').tabIndex, document.getElementById('tab-progress').tabIndex] })`);
     check(m.hash === '' && m.focus === 'tab-settings' && m.settings && m.progress && m.form && m.conn === 'flex' && m.sub === 'Tutor settings', JSON.stringify(m));
     check(JSON.stringify(m.tabindex) === '[0,-1]', `roving tabindex: ${m.tabindex}`);
     await page.screenshot(path.join(shots, 'settings-tab-dark.png'), { width: 1280, height: 700, scheme: 'dark' });
+    // On to the Changelog, then round to Progress again.
     await key(page, 'ArrowRight');
-    check(await page.eval(`location.hash === '#progress' && !document.getElementById('panel-progress').hidden`), 'back to Progress');
+    const log = await page.eval(`({ hash: location.hash, focus: document.activeElement.id, panel: !document.getElementById('panel-changelog').hidden, settings: document.getElementById('panel-settings').hidden, progress: document.getElementById('panel-progress').hidden, sub: document.getElementById('page-sub').textContent, conn: getComputedStyle(document.getElementById('connection')).display, tabindex: ['settings', 'progress', 'changelog'].map((t) => document.getElementById('tab-' + t).tabIndex) })`);
+    check(log.hash === '#changelog' && log.focus === 'tab-changelog' && log.panel && log.settings && log.progress && log.sub === "What's new" && log.conn === 'none', JSON.stringify(log));
+    check(JSON.stringify(log.tabindex) === '[-1,-1,0]', `roving tabindex: ${log.tabindex}`);
+    await key(page, 'ArrowRight');
+    check(await page.eval(`location.hash === '#progress' && !document.getElementById('panel-progress').hidden`), 'round to Progress');
+    await key(page, 'ArrowLeft');
+    check(await page.eval(`location.hash === '#changelog'`), 'back to the Changelog');
+    await key(page, 'ArrowLeft');
+    await key(page, 'ArrowLeft');
+    check(await page.eval(`location.hash === '#progress' && !document.getElementById('panel-progress').hidden`), 'and back to Progress');
   });
 
   for (const width of [400, 600, 900]) {

@@ -85,7 +85,7 @@ try {
       tabs: [...document.querySelectorAll('.tab')].map((t) => t.textContent),
     })`);
     check(m.label === 'Problem Sets', m.label);
-    check(m.tabs.join() === 'Progress,Settings', `tab order: ${m.tabs}`);
+    check(m.tabs.join() === 'Progress,Settings,Changelog', `tab order: ${m.tabs}`);
     check(m.options.map((o) => o.id).join() === LISTS.map((l) => l.id).join(), `order: ${m.options.map((o) => o.id)}`);
     for (const [i, o] of m.options.entries()) check(o.name === LISTS[i].title, JSON.stringify(o));
     check(m.options.find((o) => o.id === 'top-100-liked').name === 'Top 100 Liked by LeetCode' && m.options.find((o) => o.id === 'top-interview-150').name === 'Top Interview 150 by LeetCode', 'by LeetCode names');

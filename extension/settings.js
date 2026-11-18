@@ -985,6 +985,10 @@
   }
 
   function renderFoot() {
+    // The running version, with the way to the Changelog tab.
+    const line = $("version-line");
+    line.textContent = "";
+    line.append(`Version ${api.runtime.getManifest().version}. `, h("a", { href: "#changelog", text: "What's new" }));
     const foot = $("foot");
     foot.textContent = "";
     if (runtimeOf(selected) === "extension") {

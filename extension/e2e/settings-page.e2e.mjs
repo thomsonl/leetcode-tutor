@@ -291,15 +291,16 @@ await scenario('layout: Test connection keeps its width beside a long message, a
   const after = await size();
   assert.deepEqual(after, before, 'the button kept its one-line size');
   assert.equal(after.h, 32);
-  // The Helper card's status line scrolled to where the bar floats: the bar
-  // covers it (nothing shows through next to Save).
-  await page.eval(`(() => { const r = document.getElementById('helper-state').getBoundingClientRect(); window.scrollBy(0, r.top + r.height / 2 - (innerHeight - 28)); })()`);
+  // The Test connection button scrolled to where the bar floats: the bar
+  // covers it (nothing shows through next to Save). The Helper card is
+  // outside the form, below it, so the bar never floats over that one.
+  await page.eval(`(() => { const r = document.getElementById('test').getBoundingClientRect(); window.scrollBy(0, r.top + r.height / 2 - (innerHeight - 28)); })()`);
   // (Hit testing skips the bar while the form is greyed out, so it takes
   // pointer events for the probe only.)
   const hit = await page.eval(`(() => {
     const bar = document.querySelector('.savebar');
     bar.style.pointerEvents = 'auto';
-    const r = document.getElementById('helper-state').getBoundingClientRect();
+    const r = document.getElementById('test').getBoundingClientRect();
     const el = document.elementFromPoint(r.left + 4, r.top + r.height / 2);
     bar.style.pointerEvents = '';
     return { inBar: Boolean(el && el.closest('.savebar')), bg: getComputedStyle(bar).backgroundColor, opacity: getComputedStyle(bar).opacity };
