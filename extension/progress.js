@@ -17,7 +17,7 @@
 // All text is inserted with textContent / createElement, never innerHTML.
 
 import { DEFAULT_LIST_ID, LISTS, listById, nextOnRoadmap, problemUrl, progress } from './shared/roadmap.js';
-import { ACTIVE_LIST_KEY, SOLVED_KEY, STARRED_KEY, normalizeSolved, normalizeStarred } from './shared/solved.js';
+import { ACTIVE_LIST_KEY, SOLVED_KEY, STARRED_KEY, SYNCED_AT_KEY, normalizeSolved, normalizeStarred } from './shared/solved.js';
 
 const api = typeof browser !== 'undefined' ? browser : chrome;
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -376,7 +376,12 @@ function renderSummary() {
       h(
         'div',
         { class: 'total-box' },
-        h('button', { type: 'button', class: 'btn sync-btn', id: 'sync-btn', onclick: () => syncFromLeetCode() }, 'Sync from LeetCode'),
+        h(
+          'div',
+          { class: 'sync-group' },
+          h('button', { type: 'button', class: 'btn sync-btn', id: 'sync-btn', onclick: () => syncFromLeetCode() }, 'Sync from LeetCode'),
+          h('span', { class: 'sync-last', id: 'sync-last' })
+        ),
         h('p', { class: 'total' }, h('span', { class: 'total-done', text: String(all.solved) }), h('span', { class: 'total-of', text: ` / ${all.total} solved` })),
         h('p', { class: 'sync-status', id: 'sync-status', role: 'status', 'aria-live': 'polite' })
       )
@@ -891,17 +896,66 @@ let syncing = false;
 let syncNote = '';
 let syncResult = '';
 let syncTimer = 0;
+
+// Whether LeetCode is signed in, as a problem tab last reported it:
+// 'signed-in', 'signed-out', or 'unknown' (no problem tab open, or it would
+// not say). Signed out turns the button red and keeps it that way (and
+// disabled) until LeetCode is signed in again; unknown leaves it usable, and
+// pressing it explains what is missing.
+const SIGNED_OUT_LABEL = 'LeetCode not logged in';
+const SIGNED_OUT_TIP = 'Sign in to LeetCode in a problem tab, then this button works again.';
+let loginState = 'unknown';
+let syncedAt = '';
+
+// "Last synced 5 min ago", from the time the worker stored at the last merge.
+function lastSyncedText(iso, nowMs = Date.now()) {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return 'Never synced';
+  const minutes = Math.max(0, Math.floor((nowMs - then) / 60000));
+  if (minutes < 1) return 'Last synced just now';
+  if (minutes < 60) return `Last synced ${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Last synced ${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  return `Last synced ${days} ${days === 1 ? 'day' : 'days'} ago`;
+}
+
 function paintSync() {
   const button = $('sync-btn');
   const status = $('sync-status');
+  const last = $('sync-last');
+  const out = loginState === 'signed-out';
   if (button) {
-    button.disabled = syncing;
+    button.disabled = syncing || out;
+    button.textContent = out ? SIGNED_OUT_LABEL : 'Sync from LeetCode';
+    if (out) button.dataset.login = 'out';
+    else delete button.dataset.login;
     if (syncResult) button.dataset.result = syncResult;
     else delete button.dataset.result;
-    if (syncNote) button.title = syncNote;
+    const tip = out ? SIGNED_OUT_TIP : syncNote;
+    if (tip) button.title = tip;
     else button.removeAttribute('title');
   }
-  if (status) status.textContent = syncNote;
+  if (status) status.textContent = out ? SIGNED_OUT_LABEL : syncNote;
+  if (last) {
+    last.textContent = lastSyncedText(syncedAt);
+    const when = Date.parse(syncedAt);
+    if (Number.isNaN(when)) last.removeAttribute('title');
+    else last.title = new Date(when).toLocaleString();
+  }
+}
+
+// Asks the worker (which asks a problem tab) whether LeetCode is signed in.
+async function refreshLogin() {
+  let answer = null;
+  try {
+    answer = await api.runtime.sendMessage({ type: 'lc-tutor:login-state' });
+  } catch {
+    answer = null;
+  }
+  const next = answer && answer.ok === true && (answer.state === 'signed-out' || answer.state === 'signed-in') ? answer.state : 'unknown';
+  if (next !== loginState) loginState = next;
+  paintSync();
 }
 
 async function syncFromLeetCode() {
@@ -920,6 +974,8 @@ async function syncFromLeetCode() {
   syncing = false;
   syncNote = syncText(answer);
   syncResult = answer && answer.ok === true ? 'ok' : 'fail';
+  if (answer && answer.ok === true) loginState = 'signed-in';
+  else if (answer && answer.reason === 'signed-out') loginState = 'signed-out';
   paintSync();
   syncTimer = setTimeout(() => {
     syncResult = '';
@@ -974,9 +1030,10 @@ async function toggleStar(slug) {
 
 async function load() {
   try {
-    const stored = await api.storage.local.get([SOLVED_KEY, STARRED_KEY, ACTIVE_LIST_KEY]);
+    const stored = await api.storage.local.get([SOLVED_KEY, STARRED_KEY, ACTIVE_LIST_KEY, SYNCED_AT_KEY]);
     solved = normalizeSolved(stored[SOLVED_KEY]);
     starred = normalizeStarred(stored[STARRED_KEY]);
+    syncedAt = typeof stored[SYNCED_AT_KEY] === 'string' ? stored[SYNCED_AT_KEY] : '';
     useList(stored[ACTIVE_LIST_KEY]);
   } catch {
     solved = {};
@@ -989,6 +1046,11 @@ api.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (SOLVED_KEY in changes) solved = normalizeSolved(changes[SOLVED_KEY].newValue);
   if (STARRED_KEY in changes) starred = normalizeStarred(changes[STARRED_KEY].newValue);
+  if (SYNCED_AT_KEY in changes) {
+    const value = changes[SYNCED_AT_KEY].newValue;
+    syncedAt = typeof value === 'string' ? value : '';
+    paintSync();
+  }
   // The list chosen here, in another tab, or from a Tutor card.
   const listChanged = ACTIVE_LIST_KEY in changes && useList(changes[ACTIVE_LIST_KEY].newValue);
   if (SOLVED_KEY in changes || STARRED_KEY in changes || listChanged) render();
@@ -998,3 +1060,15 @@ api.storage.onChanged.addListener((changes, area) => {
 // before the list actually chosen.
 await load();
 wireTabs();
+
+// Keep the button honest: ask whether LeetCode is signed in now, whenever the
+// page comes back into view, and every 30 seconds while it is open (the same
+// tick keeps "Last synced 5 min ago" current).
+refreshLogin();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshLogin();
+});
+window.addEventListener('focus', () => refreshLogin());
+setInterval(() => {
+  if (!document.hidden) refreshLogin();
+}, 30000);

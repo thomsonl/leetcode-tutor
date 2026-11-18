@@ -241,6 +241,24 @@ async function syncNow() {
   return { ok: false, reason: reached ? "failed" : "no-tab" };
 }
 
+// Whether LeetCode is signed in, asked of the first problem tab that answers.
+// "no-tab" when none is open, "unknown" when one is open but would not say.
+async function loginState() {
+  const tabs = (await api.tabs.query({})).slice(0, 200);
+  let reached = false;
+  for (const tab of tabs) {
+    let answer = null;
+    try {
+      answer = await api.tabs.sendMessage(tab.id, { type: "lc-tutor:login-state" });
+    } catch {
+      answer = null;
+    }
+    if (answer) reached = true;
+    if (answer && answer.ok === true) return { ok: true, state: answer.signedIn ? "signed-in" : "signed-out" };
+  }
+  return { ok: true, state: reached ? "unknown" : "no-tab" };
+}
+
 // The extension's page on one of its tabs ("settings" or "progress"): a page
 // already open is moved to that tab and brought forward (the browser's own
 // openOptionsPage would leave it on whichever tab it was showing), or a new
@@ -283,6 +301,15 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return undefined;
     }
     syncNow().then(sendResponse, () => sendResponse({ ok: false, reason: "failed" }));
+    return true;
+  }
+  // The Progress tab asks whether LeetCode is signed in, to colour the button.
+  if (message && message.type === "lc-tutor:login-state") {
+    if (!sender.url || !sender.url.startsWith(`${new URL(api.runtime.getURL("")).origin}/`)) {
+      sendResponse({ ok: false });
+      return undefined;
+    }
+    loginState().then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
   if (message && SOLVED_MESSAGES.has(message.type)) {

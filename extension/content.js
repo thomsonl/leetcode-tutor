@@ -549,6 +549,26 @@
     return { ok: true, slugs };
   }
 
+  // Whether this tab's LeetCode session is signed in, without fetching the
+  // problem list. Resolves to { ok: true, signedIn } or { ok: false }.
+  async function fetchLoginState(fetchImpl = (...args) => fetch(...args)) {
+    try {
+      const response = await fetchImpl("/graphql/", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: "query lcTutorLogin { userStatus { isSignedIn } }" }),
+      });
+      if (!response.ok) return { ok: false };
+      const body = await response.json();
+      const status = body && body.data && body.data.userStatus;
+      if (!status || typeof status.isSignedIn !== "boolean") return { ok: false };
+      return { ok: true, signedIn: status.isSignedIn };
+    } catch {
+      return { ok: false };
+    }
+  }
+
   // Once every 12 hours, when a problem page opens: the worker says whether
   // a sync is due, and if so the solved problems are merged in the background.
   async function autoSync({ send = sendToBackground, fetchSolved = fetchSolvedSlugs } = {}) {
@@ -579,6 +599,7 @@
       handToBackground,
       handleAccepted,
       fetchSolvedSlugs,
+      fetchLoginState,
       autoSync,
     };
     return;
@@ -593,7 +614,12 @@
       (typeof browser !== "undefined" && browser.runtime) || (typeof chrome !== "undefined" && chrome.runtime) || null;
     if (runtime && runtime.id && runtime.onMessage) {
       runtime.onMessage.addListener((message, sender, sendResponse) => {
-        if (sender.id !== runtime.id || !message || message.type !== "lc-tutor:sync-fetch") return undefined;
+        if (sender.id !== runtime.id || !message) return undefined;
+        if (message.type === "lc-tutor:login-state") {
+          fetchLoginState().then(sendResponse, () => sendResponse({ ok: false }));
+          return true;
+        }
+        if (message.type !== "lc-tutor:sync-fetch") return undefined;
         fetchSolvedSlugs().then(sendResponse, () => sendResponse({ ok: false, reason: "failed" }));
         return true;
       });

@@ -299,6 +299,9 @@ html.drawer-open { overflow: hidden; }
 .btn.sync-btn[data-result="ok"], .btn.sync-btn[data-result="ok"]:hover:not(:disabled) { background: var(--green); border-color: transparent; color: #fff; }
 .btn.sync-btn[data-result="fail"], .btn.sync-btn[data-result="fail"]:hover:not(:disabled) { background: var(--red); border-color: transparent; color: #fff; }
 .sync-btn:disabled[data-result] { opacity: 1; }
+.btn.sync-btn[data-login="out"], .btn.sync-btn[data-login="out"]:disabled { background: var(--red); border-color: transparent; color: #fff; opacity: 1; cursor: not-allowed; }
+.sync-group { display: flex; align-items: center; gap: 10px; }
+.sync-last { color: var(--muted); font-size: 12px; line-height: 16px; white-space: nowrap; }
 @media (max-width: 760px) {
   .total-box { justify-content: flex-start; margin: 4px 0 8px; }
 }
