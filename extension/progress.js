@@ -18,6 +18,7 @@
 
 import { DEFAULT_LIST_ID, LISTS, listById, nextOnRoadmap, problemUrl, progress } from './shared/roadmap.js';
 import { ACTIVE_LIST_KEY, SOLVED_KEY, STARRED_KEY, SYNCED_AT_KEY, normalizeSolved, normalizeStarred } from './shared/solved.js';
+import { showChangelog } from './changelog.js';
 
 const api = typeof browser !== 'undefined' ? browser : chrome;
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -162,8 +163,10 @@ function formatDate(iso) {
 
 // ---- the tab bar -----------------------------------------------------------
 
-const TABS = ['progress', 'settings'];
-const subtitle = (name) => (name === 'progress' ? `Your ${ROADMAP.title} progress` : 'Tutor settings');
+const TABS = ['progress', 'settings', 'changelog'];
+const subtitle = (name) => (name === 'progress' ? `Your ${ROADMAP.title} progress` : name === 'changelog' ? "What's new" : 'Tutor settings');
+// The tab an address names: #progress or #changelog, else Settings.
+const tabFromHash = () => (location.hash === '#progress' ? 'progress' : location.hash === '#changelog' ? 'changelog' : 'settings');
 
 function selectTab(name, { focus = false, push = true } = {}) {
   for (const tab of TABS) {
@@ -177,9 +180,10 @@ function selectTab(name, { focus = false, push = true } = {}) {
   document.body.dataset.tab = name;
   $('page-sub').textContent = subtitle(name);
   if (push) {
-    const url = name === 'progress' ? '#progress' : `${location.pathname}${location.search}`;
+    const url = name === 'progress' || name === 'changelog' ? `#${name}` : `${location.pathname}${location.search}`;
     history.replaceState(null, '', url);
   }
+  if (name === 'changelog') showChangelog($('panel-changelog'));
   if (name === 'progress') {
     if (!built) build();
     else layoutView();
@@ -201,8 +205,8 @@ function wireTabs() {
     event.preventDefault();
     selectTab(next, { focus: true });
   });
-  window.addEventListener('hashchange', () => selectTab(location.hash === '#progress' ? 'progress' : 'settings', { push: false }));
-  selectTab(location.hash === '#progress' ? 'progress' : 'settings', { push: false });
+  window.addEventListener('hashchange', () => selectTab(tabFromHash(), { push: false }));
+  selectTab(tabFromHash(), { push: false });
 }
 
 // ---- the tab's content -----------------------------------------------------

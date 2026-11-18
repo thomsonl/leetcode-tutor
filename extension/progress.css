@@ -62,7 +62,7 @@
 /* The Progress tab takes a wider page for the graph; Settings keeps its
    reading width. */
 body[data-tab="progress"] main { max-width: 1120px; }
-body[data-tab="progress"] #connection { display: none; }
+body[data-tab="progress"] #connection, body[data-tab="changelog"] #connection { display: none; }
 [role="tabpanel"][hidden] { display: none; }
 
 /* ---- summary ---------------------------------------------------------------- */

@@ -1325,6 +1325,16 @@
     button.mode-opt[aria-pressed="true"] { color: var(--fg); background: var(--fill); cursor: default; }
     button.mode-opt:disabled:not([aria-pressed="true"]) { opacity: 0.55; cursor: progress; }
     button.mode-opt:focus-visible { outline: 1px solid color-mix(in srgb, var(--fg) 45%, transparent); outline-offset: 0; }
+    /* The "Updated to x.y.z" row under the header, shown until it is
+       dismissed or the Changelog has been opened. */
+    .update { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 1px; padding: 6px 12px; border-bottom: 1px solid var(--head-line); background: var(--fill); color: var(--muted); font-size: 12px; line-height: 16px; }
+    .update[hidden] { display: none; }
+    .update-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    button.update-link { flex: none; width: auto; height: 20px; padding: 0 6px; border-radius: 4px; color: var(--fg); font: 500 12px / 16px var(--font); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; cursor: pointer; }
+    button.update-link:hover { background: var(--fill); }
+    button.update-close { flex: none; width: 20px; height: 20px; margin-right: -4px; border-radius: 4px; color: var(--muted); cursor: pointer; }
+    button.update-close:hover { color: var(--fg); background: var(--fill); }
+    button.update-link:focus-visible, button.update-close:focus-visible { outline: 1px solid color-mix(in srgb, var(--fg) 45%, transparent); outline-offset: 0; }
     .menu {
       position: absolute; z-index: 5; top: 30px; right: 8px; box-sizing: border-box;
       width: max-content; min-width: min(220px, calc(100% - 16px)); max-width: min(320px, calc(100% - 16px));
@@ -1884,6 +1894,36 @@
     headRight.append(modeGroup, model, practice, progress, gear);
     head.append(headLeft, headRight);
 
+    // After an update (see shared/update-notice.js): what happened, a link to
+    // the Changelog, and a close button. Hidden until the worker says so.
+    const updateRow = el("div", "update");
+    updateRow.hidden = true;
+    updateRow.setAttribute("role", "status");
+    const updateText = el("span", "update-text", "");
+    const updateLink = document.createElement("button");
+    updateLink.type = "button";
+    updateLink.className = "update-link";
+    updateLink.textContent = "What's new";
+    const updateClose = document.createElement("button");
+    updateClose.type = "button";
+    updateClose.className = "update-close";
+    updateClose.setAttribute("aria-label", "Dismiss");
+    updateClose.title = "Dismiss";
+    // Feather's "x" (MIT), drawn in the text color.
+    updateClose.innerHTML =
+      '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+    updateRow.append(updateText, updateLink, updateClose);
+    updateLink.addEventListener("click", () => {
+      updateNote = null;
+      sendToWorker({ type: "lc-tutor:open-changelog" });
+      scheduleRender();
+    });
+    updateClose.addEventListener("click", () => {
+      updateNote = null;
+      sendToWorker({ type: "lc-tutor:update-seen" });
+      scheduleRender();
+    });
+
     const banner = el("div", "banner");
     banner.hidden = true;
 
@@ -1958,7 +1998,7 @@
     counter.setAttribute("aria-live", "polite");
     composer.appendChild(counter);
 
-    wrap.append(head, scroll, composer, menu);
+    wrap.append(head, updateRow, scroll, composer, menu);
     root.append(style, wrap);
 
     // LeetCode binds many single-key shortcuts on the page, and this script's
@@ -1966,7 +2006,7 @@
     // here must trigger neither, so keys stop at the host.
     for (const type of ["keydown", "keyup", "keypress"]) host.addEventListener(type, (e) => e.stopPropagation());
 
-    const p = { host, wrap, status, statusText, headRight, modeGroup, modeButtons, model, provider, menu, gear, practice, progress, banner, scroll, view, feed, box, input, send, hint, counter };
+    const p = { host, wrap, status, statusText, headRight, modeGroup, modeButtons, updateRow, updateText, model, provider, menu, gear, practice, progress, banner, scroll, view, feed, box, input, send, hint, counter };
     for (const [id, button] of Object.entries(modeButtons)) button.addEventListener("click", () => chooseMode(id));
     wireSwitcher(p);
     return p;
@@ -2106,6 +2146,21 @@
       // The extension was reloaded under this page; nothing to do.
     }
   }
+
+  // The update the worker noticed ({ from, to }) while it is still unseen,
+  // for the row under the header; asked again when the page regains focus, so
+  // a card dismissed or a Changelog opened in another tab goes here too.
+  let updateNote = null;
+  async function checkUpdate() {
+    const answer = await askWorker({ type: "lc-tutor:update-notice" });
+    const next = answer && answer.ok === true && answer.notice && typeof answer.notice.to === "string" ? answer.notice : null;
+    const changed = (next && next.to) !== (updateNote && updateNote.to) || (next && next.from) !== (updateNote && updateNote.from);
+    updateNote = next;
+    if (changed) scheduleRender();
+  }
+  window.addEventListener("focus", () => {
+    if (mounted) checkUpdate();
+  });
 
   // A message to the background worker that waits for its answer; null when
   // it cannot be asked.
@@ -2855,6 +2910,10 @@
     if (p.model.hidden && !p.menu.hidden) closeMenu(p, false);
     if (!p.menu.hidden) renderMenu(p);
 
+    const updateText = updateNote ? (updateNote.from ? `Updated from ${updateNote.from} to ${updateNote.to}.` : `Updated to ${updateNote.to}.`) : "";
+    if (p.updateRow.hidden !== !updateNote) p.updateRow.hidden = !updateNote;
+    if (p.updateText.textContent !== updateText) p.updateText.textContent = updateText;
+
     // The mode switch shows whenever there is a tutor to switch, and is held
     // still while a switch is under way.
     if (p.modeGroup.hidden !== !providerText) p.modeGroup.hidden = !providerText;
@@ -3049,6 +3108,7 @@
     };
     tab.setAttribute("aria-selected", "false");
     mounted = m;
+    checkUpdate();
     // A fresh panel has an empty feed; the cached item nodes move into it on
     // the next render.
     feedDirty = true;

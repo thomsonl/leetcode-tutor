@@ -26,6 +26,7 @@ import { createHelperLauncher } from "./shared/helper-launcher.js";
 import { createSolvedService } from "./shared/solved.js";
 import { createNativeSetup } from "./shared/native-setup.js";
 import { registerUninstallPage } from "./shared/uninstall-page.js";
+import { createUpdateNotice } from "./shared/update-notice.js";
 
 const api = typeof browser !== "undefined" ? browser : chrome;
 const PANEL_PORT = "lc-tutor-panel";
@@ -218,6 +219,23 @@ const solved = createSolvedService({
   extensionOrigin: new URL(api.runtime.getURL("")).origin,
   log: (text) => console.warn(`[leetcode-capture] ${text}`),
 });
+// The toolbar badge and the note that an update happened.
+const updateNotice = createUpdateNotice({
+  storage: {
+    get: (keys) => api.storage.local.get(keys),
+    set: (items) => api.storage.local.set(items),
+    remove: (keys) => api.storage.local.remove(keys),
+  },
+  badge: {
+    set: async (text) => {
+      if (!api.action || !api.action.setBadgeText) return;
+      await api.action.setBadgeText({ text });
+      if (text && api.action.setBadgeBackgroundColor) await api.action.setBadgeBackgroundColor({ color: "#2cbb5d" });
+    },
+  },
+  version: () => api.runtime.getManifest().version,
+  log: (text) => console.warn(`[leetcode-capture] ${text}`),
+});
 const SOLVED_MESSAGES = new Set(["lc-tutor:accepted", "lc-tutor:solved-set", "lc-tutor:star-set", "lc-tutor:set-list", "lc-tutor:practice", "lc-tutor:sync-check", "lc-tutor:sync-solved"]);
 
 async function syncNow() {
@@ -305,6 +323,20 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   // The Progress tab asks whether LeetCode is signed in, to colour the button.
+  // An update the extension noticed (shared/update-notice.js): the Tutor tab's
+  // card and the Changelog tab ask for it, and tell the worker when it is seen.
+  if (message && message.type === "lc-tutor:update-notice") {
+    updateNotice.pending().then((notice) => sendResponse({ ok: true, notice }), () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (message && message.type === "lc-tutor:update-seen") {
+    updateNotice.seen().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (message && message.type === "lc-tutor:open-changelog") {
+    openOurPage("changelog");
+    return undefined;
+  }
   if (message && message.type === "lc-tutor:login-state") {
     if (!sender.url || !sender.url.startsWith(`${new URL(api.runtime.getURL("")).origin}/`)) {
       sendResponse({ ok: false });
@@ -391,8 +423,27 @@ if (api.permissions.onRemoved) {
 // worker would stay asleep until the next problem tab. The call at start is
 // for a worker woken by something else first (the resume record is used
 // only once either way).
-if (api.runtime.onInstalled) api.runtime.onInstalled.addListener(() => nativeSetup.reopenAfterReload());
+if (api.runtime.onInstalled) {
+  api.runtime.onInstalled.addListener((details) => {
+    nativeSetup.reopenAfterReload();
+    // An update the browser made by itself: remember it and badge the icon.
+    updateNotice.onInstalled(details).catch(() => {});
+  });
+}
 nativeSetup.reopenAfterReload();
+// The badge is gone after a browser restart; an update nobody has looked at
+// gets it back.
+updateNotice.refreshBadge().catch(() => {});
+// The toolbar icon opens the Changelog while an update is waiting to be seen,
+// and Settings otherwise.
+if (api.action && api.action.onClicked) {
+  api.action.onClicked.addListener(() => {
+    updateNotice.pending().then(
+      (note) => openOurPage(note ? "changelog" : "settings"),
+      () => openOurPage("settings")
+    );
+  });
+}
 
 // When the extension is removed from the browser's own extensions page, the
 // browser opens this page: how to remove the helper, which the extension
