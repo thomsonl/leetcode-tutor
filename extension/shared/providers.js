@@ -10,9 +10,6 @@
 // background worker, nothing to install) and/or 'helper' (the companion
 // process on the user's machine, which the subscription providers need
 // because they use a local sign-in). The first one listed is the default.
-// `promptTier` picks the tutor's system message (see systemMessageFor in
-// tutor-prompt.js): 'compact' is a short, strict prompt for small local models
-// with tight context windows, 'full' a richer one for capable hosted models.
 export const PROVIDERS = {
   local: {
     label: 'Local model',
@@ -20,7 +17,6 @@ export const PROVIDERS = {
     fields: ['baseUrl', 'model', 'contextTokens', 'apiKey'],
     requires: ['model'],
     runtimes: ['extension', 'helper'],
-    promptTier: 'compact',
   },
   claude: {
     label: 'Claude subscription',
@@ -28,7 +24,6 @@ export const PROVIDERS = {
     fields: ['model'],
     requires: [],
     runtimes: ['helper'],
-    promptTier: 'full',
   },
   anthropic: {
     label: 'Anthropic API key',
@@ -36,7 +31,6 @@ export const PROVIDERS = {
     fields: ['apiKey', 'model'],
     requires: ['apiKey'],
     runtimes: ['extension', 'helper'],
-    promptTier: 'full',
   },
   openai: {
     label: 'OpenAI API key',
@@ -44,7 +38,6 @@ export const PROVIDERS = {
     fields: ['apiKey', 'model', 'baseUrl'],
     requires: ['apiKey', 'model'],
     runtimes: ['extension', 'helper'],
-    promptTier: 'full',
   },
   chatgpt: {
     label: 'ChatGPT subscription',
@@ -52,7 +45,6 @@ export const PROVIDERS = {
     fields: ['model'],
     requires: [],
     runtimes: ['helper'],
-    promptTier: 'full',
   },
 };
 

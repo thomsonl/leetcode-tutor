@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { LocalBackend } from './shared/local-backend.js';
 import { AnthropicBackend, ANTHROPIC_VERSION, listAnthropicModels, toAnthropicRequest } from './shared/anthropic-backend.js';
-import { TUTOR_SYSTEM_MESSAGE, TUTOR_SYSTEM_MESSAGE_FULL } from './shared/tutor-prompt.js';
+import { TUTOR_SYSTEM_MESSAGE } from './shared/tutor-prompt.js';
 import { applyPatch, buildBackend, emptySecrets, emptySettings, explainError } from './shared/extension-settings.js';
 
 // A stub server: handler(req, body, res). Every request is recorded.
@@ -126,7 +126,7 @@ test('Anthropic: streams text deltas with the browser-access headers and the sys
     assert.equal(sent.body.model, 'claude-opus-5-5');
     assert.equal(sent.body.stream, true);
     assert.ok(sent.body.max_tokens > 0);
-    assert.ok(sent.body.system.startsWith(TUTOR_SYSTEM_MESSAGE_FULL));
+    assert.ok(sent.body.system.startsWith(TUTOR_SYSTEM_MESSAGE));
     assert.match(sent.body.system, /Find two numbers\./, 'the pinned problem goes into system');
     assert.match(sent.body.system, /x = 1/, 'the pinned code goes into system');
     assert.deepEqual(sent.body.messages, [{ role: 'user', content: 'my question' }]);

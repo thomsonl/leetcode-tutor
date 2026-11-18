@@ -268,9 +268,10 @@ const RELAY_SERVER_DIR = path.join(REPO_ROOT, 'relay-server');
 // an explicit messages array and resends it in full, OpenAI-chat style).
 
 class ClaudeBackend {
-  constructor({ model, apiKey = null }) {
+  constructor({ model, apiKey = null, systemPrompt = systemMessageFor() }) {
     this.model = model;
     this.apiKey = apiKey;
+    this.systemPrompt = systemPrompt;
     this.sessionId = undefined;
     this.queryFn = null;
   }
@@ -343,7 +344,7 @@ class ClaudeBackend {
     // anything the tutor persona needed.
     const options = {
       cwd: SCRATCH_DIR,
-      systemPrompt: systemMessageFor('claude'),
+      systemPrompt: this.systemPrompt,
       tools: [],
       mcpServers: {},
       strictMcpConfig: true,
@@ -441,10 +442,12 @@ class ClaudeBackend {
 // save or connection test (settings-rpc.js), so all of them agree.
 function makeBackend(config) {
   const { provider } = config;
-  if (provider === 'claude') return new ClaudeBackend({ model: config.model });
+  // The mode's instructions: the student's own or the default (tutor-prompt.js).
+  const systemMessage = systemMessageFor(config.mode, config.prompts);
+  if (provider === 'claude') return new ClaudeBackend({ model: config.model, systemPrompt: systemMessage });
   if (provider === 'anthropic') {
     if (!config.apiKey) throw new Error('Anthropic API key needs an API key (or ANTHROPIC_API_KEY)');
-    return new ClaudeBackend({ model: config.model, apiKey: config.apiKey });
+    return new ClaudeBackend({ model: config.model, apiKey: config.apiKey, systemPrompt: systemMessage });
   }
   if (provider === 'local' || provider === 'openai') {
     return new LocalBackend({
@@ -457,14 +460,14 @@ function makeBackend(config) {
       apiStyle: provider === 'openai' ? 'openai' : LOCAL_API,
       numCtx: config.contextTokens || DEFAULT_LOCAL_NUM_CTX,
       reserveTokens: LOCAL_RESERVE_TOKENS,
-      systemMessage: systemMessageFor(provider),
+      systemMessage,
     });
   }
   if (provider === 'chatgpt') {
     return new CodexBackend({
       model: config.model,
       cwd: path.join(SCRATCH_DIR, 'codex'),
-      systemPrompt: systemMessageFor('chatgpt'),
+      systemPrompt: systemMessage,
       maxHistoryTurns: config.options.localMaxHistoryTurns,
     });
   }
@@ -2077,7 +2080,15 @@ function backendKey(config) {
     config.apiKey,
     config.contextTokens,
     config.options.localMaxHistoryTurns,
+    promptKey(config),
   ]);
+}
+
+// The tutor's instructions (the mode and the student's own prompts). A change
+// to these starts a fresh conversation: a chat held under other instructions
+// would carry the old persona with it.
+function promptKey(config) {
+  return JSON.stringify([config.mode, config.prompts]);
 }
 
 // Puts `nextBackend` in place of the running one between turns, moving the
@@ -2087,10 +2098,11 @@ function backendKey(config) {
 // fresh, and then the ledger forgets what the tutor saw, so the next message
 // carries the full code. Returns whether the conversation moved. This is
 // also what a model switcher calls.
-function swapBackend(nextBackend) {
-  const moved = transferConversation(backend, nextBackend);
+function swapBackend(nextBackend, { fresh = false } = {}) {
+  const moved = !fresh && transferConversation(backend, nextBackend);
   backend = nextBackend;
   if (!moved) ledger.forgetHeld();
+  if (fresh) replyGuard.reset();
   return moved;
 }
 
@@ -2103,9 +2115,11 @@ function swapBackend(nextBackend) {
 function applySettings(nextEffective, nextBackend, why = 'save') {
   return queueTurn(async () => {
     const swap = backendKey(nextEffective) !== backendKey(effective);
+    const fresh = swap && promptKey(nextEffective) !== promptKey(effective);
+    const modeChanged = nextEffective.mode !== effective.mode;
     effective = nextEffective;
     if (swap) {
-      swapBackend(nextBackend);
+      swapBackend(nextBackend, { fresh });
       // A different backend has not failed yet.
       signInNeeded = null;
     }
@@ -2113,11 +2127,22 @@ function applySettings(nextEffective, nextBackend, why = 'save') {
     const model = now.model ? ` (${oneLine(now.model)})` : '';
     printAboveInput(
       dim(
-        why === 'switch'
-          ? `companion: switched models - now using ${now.label}${model}, same conversation`
-          : `companion: settings saved - ${swap ? 'now using' : 'still using'} ${now.label}${model}`
+        fresh
+          ? `companion: ${modeChanged ? `switched to ${effective.mode} mode` : 'prompt changed'} - now using ${now.label}${model}, fresh conversation`
+          : why === 'switch'
+            ? `companion: switched models - now using ${now.label}${model}, same conversation`
+            : `companion: settings saved - ${swap ? 'now using' : 'still using'} ${now.label}${model}`
       )
     );
+    // The panel forgets its transcripts too, as it does for a new problem.
+    if (fresh && panelBridge) {
+      panelPublish({
+        type: 'notice',
+        problemSlug: null,
+        text: modeChanged ? `Switched to ${effective.mode === 'interviewer' ? 'Interviewer' : 'Tutor'} mode. Started a fresh conversation.` : 'Prompt changed. Started a fresh conversation.',
+        switch: true,
+      });
+    }
     publishConfig();
   }).catch((err) => {
     printAboveInput(dim(`companion: error applying settings: ${err.message}`));

@@ -32,6 +32,14 @@ import {
   findProfile,
   migrateProfiles,
 } from '../extension/shared/profiles.js';
+import {
+  DEFAULT_PROMPTS,
+  MAX_PROMPT_CHARS,
+  MODES,
+  PromptError,
+  normalizeMode,
+  normalizePrompts,
+} from '../extension/shared/tutor-prompt.js';
 
 const DEFAULT_FIELDS = {
   local: { baseUrl: OLLAMA_BASE_URL, model: null, contextTokens: 8192, apiKey: null },
@@ -67,7 +75,18 @@ export function settingsPath(env = process.env) {
 export function emptySettings() {
   const providers = {};
   for (const id of Object.keys(PROVIDERS)) providers[id] = { ...DEFAULT_FIELDS[id] };
-  return { version: SETTINGS_VERSION, provider: null, providers, options: { ...DEFAULT_OPTIONS }, profiles: [], activeProfile: null };
+  return {
+    version: SETTINGS_VERSION,
+    provider: null,
+    providers,
+    options: { ...DEFAULT_OPTIONS },
+    profiles: [],
+    activeProfile: null,
+    // The tutor's mode and the student's own prompt for each (null: the
+    // shipped default); see extension/shared/tutor-prompt.js.
+    mode: 'tutor',
+    prompts: { tutor: null, interviewer: null },
+  };
 }
 
 // The saved models the Tutor panel's switcher may move the helper between
@@ -198,6 +217,8 @@ export function sanitizeStored(input) {
   out.profiles = migrated.profiles;
   out.activeProfile = migrated.activeProfile;
   syncActive(out);
+  out.mode = normalizeMode(input.mode);
+  out.prompts = normalizePrompts(input.prompts);
   return out;
 }
 
@@ -275,6 +296,21 @@ export function applyPatch(stored, patch) {
     followLegacyPatch(next);
   }
   syncActive(next);
+  if (patch.mode !== undefined) {
+    if (!MODES.includes(patch.mode)) throw new SettingsError('unknown mode', 'mode');
+    next.mode = patch.mode;
+  }
+  if (patch.prompts !== undefined) {
+    if (!patch.prompts || typeof patch.prompts !== 'object' || Array.isArray(patch.prompts)) throw new SettingsError('prompts must be an object', 'prompts');
+    // Partial: only the modes named change; null puts one back to its default.
+    const merged = { ...normalizePrompts(next.prompts) };
+    for (const mode of MODES) if (patch.prompts[mode] !== undefined) merged[mode] = patch.prompts[mode];
+    try {
+      next.prompts = normalizePrompts(merged, { strict: true });
+    } catch (err) {
+      throw new SettingsError(err instanceof PromptError ? err.message : 'prompts are not valid', 'prompts');
+    }
+  }
   return next;
 }
 
@@ -383,6 +419,8 @@ export function resolveEffective(stored, env = process.env) {
     contextTokens,
     options,
     locks,
+    mode: normalizeMode(stored.mode),
+    prompts: normalizePrompts(stored.prompts),
   };
 }
 
@@ -427,6 +465,7 @@ export function statusSummary(effective) {
     label: PROVIDERS[effective.provider].label,
     model: effective.model || null,
     profile: effective.profile || null,
+    mode: normalizeMode(effective.mode),
   };
 }
 
@@ -455,6 +494,10 @@ export function publicView(stored, env = process.env, file = settingsPath(env)) 
     locks: effective.locks,
     profiles: (stored.profiles || []).map((p) => ({ ...p })),
     activeProfile: stored.activeProfile || null,
+    mode: effective.mode,
+    prompts: effective.prompts,
+    promptDefaults: { ...DEFAULT_PROMPTS },
+    promptMaxChars: MAX_PROMPT_CHARS,
     catalog: Object.fromEntries(
       Object.entries(PROVIDERS).map(([id, p]) => [id, { label: p.label, hint: p.hint, fields: p.fields, requires: p.requires }])
     ),

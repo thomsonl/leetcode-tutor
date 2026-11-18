@@ -200,7 +200,7 @@ test('publicView never contains a key, but says whether one exists and where it 
 test('statusSummary is non-secret and names the provider and the saved profile in use', () => {
   const stored = applyPatch(emptySettings(), { provider: 'local', providers: { local: { model: 'gpt-oss:20b', apiKey: 'k' } } });
   const eff = resolveEffective(stored, {});
-  assert.deepEqual(statusSummary(eff), { provider: 'local', label: 'Local model', model: 'gpt-oss:20b', profile: 'default' });
+  assert.deepEqual(statusSummary(eff), { provider: 'local', label: 'Local model', model: 'gpt-oss:20b', profile: 'default', mode: 'tutor' });
   // An env var that runs something else means no saved profile is in use.
   assert.equal(statusSummary(resolveEffective(stored, { COMPANION_MODEL: 'other' })).profile, null);
   assert.equal(statusSummary(resolveEffective(stored, { COMPANION_BACKEND: 'openai' })).profile, null);
