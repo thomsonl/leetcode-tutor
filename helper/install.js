@@ -242,7 +242,40 @@ function removeOwnedFolder(dir, removed, leftover) {
   }
 }
 
-export function uninstall({ platform = process.platform, home, env = process.env, reg = defaultReg, keepSettings = false }) {
+// When this copy of the helper runs from npx's cache
+// (.../_npx/<hash>/node_modules/leetcode-capture-helper), the folder npx made
+// for it: the companion and relay the helper starts live in there too, so it
+// is what is left once everything else is removed. Null when the copy is not
+// in npx's cache, or when that folder holds anything besides this package
+// (npx names folders by what they were asked to run, but a folder that lists
+// other packages is never ours to delete).
+export function npxCacheFolder(appDir) {
+  const parts = path.resolve(appDir).split(path.sep);
+  const at = parts.lastIndexOf('_npx');
+  if (at < 0 || parts.length < at + 4 || parts[at + 2] !== 'node_modules' || parts[at + 3] !== 'leetcode-capture-helper') return null;
+  const dir = parts.slice(0, at + 2).join(path.sep);
+  try {
+    const dependencies = Object.keys(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).dependencies || {});
+    return dependencies.length === 1 && dependencies[0] === 'leetcode-capture-helper' ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+// Best effort, never reported as a leftover: on Windows the running helper
+// holds files in there open, and npm clears its own cache in time anyway.
+function removeNpxCopy(appDir, removed) {
+  const dir = npxCacheFolder(appDir);
+  if (!dir) return;
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    removed.push(dir);
+  } catch {
+    // in use; npm's own cache cleanup takes it later
+  }
+}
+
+export function uninstall({ platform = process.platform, home, env = process.env, reg = defaultReg, keepSettings = false, appDir = HERE }) {
   const where = layout({ platform, home, env });
   const receipt = readReceipt(where);
   const removed = [];
@@ -251,6 +284,7 @@ export function uninstall({ platform = process.platform, home, env = process.env
     // An earlier uninstall may have left its folders behind.
     removeOwnedFolder(where.dataDir, removed, leftover);
     if (!keepSettings && !env.LEETCODE_CAPTURE_SETTINGS) removeOwnedFolder(where.settingsDir, removed, leftover);
+    removeNpxCopy(appDir, removed);
     return { removed, leftover, nothing: removed.length === 0 && leftover.length === 0 };
   }
   for (const key of receipt.registry || []) {
@@ -282,6 +316,7 @@ export function uninstall({ platform = process.platform, home, env = process.env
   }
   // Unless asked to keep it, the saved tutor settings (which may hold an API key).
   if (!keepSettings && !env.LEETCODE_CAPTURE_SETTINGS) removeOwnedFolder(where.settingsDir, removed, leftover);
+  removeNpxCopy(appDir, removed);
   return { removed, leftover, nothing: false };
 }
 

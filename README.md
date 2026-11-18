@@ -46,3 +46,20 @@ In PowerShell, git and npm print some normal progress in red (for example `Nativ
    ```
 
    Run it in a terminal, press Check again, and once the Helper says Running, press Save.
+
+## Uninstall
+
+Remove the extension from `chrome://extensions` (or your browser's own extensions page).
+The browser deletes everything the extension stored: your settings, API keys and solved problems.
+If you never set up the helper (a local model or an API key does not use it), you are done.
+
+If you did, run this once in a terminal to remove the helper from your computer:
+
+```sh
+npx leetcode-capture-helper uninstall
+```
+
+It removes the helper's files, its registration with your browsers, and its saved settings.
+Add `--keep-settings` to keep the saved settings.
+The helper stops by itself when the browser closes its connection, so removing the extension also ends its process.
+Any notes the optional vault feature wrote are ordinary files in your vault; delete them like any other file.

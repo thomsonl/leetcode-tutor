@@ -83,7 +83,11 @@ Your data is not used for advertising, for creditworthiness or lending, or for a
 
 - To remove a saved API key, use the key's Remove button on the Settings page and save.
 - To remove all settings, keys, solved problems and preferences the extension stored, uninstall the extension; the browser deletes its extension storage.
-- To remove the helper and what it wrote, run `npx leetcode-capture-helper uninstall`, and delete `~/.config/leetcode-capture/settings.json` and `relay-server/data/captures.jsonl` if they exist.
+- When you remove the extension, the browser opens the project's Uninstall page on GitHub (https://github.com/thomsonl/leetcode-tutor#uninstall) in a new tab.
+  The extension sends nothing with that visit; the address has no identifier or version in it.
+- To remove the helper and what it wrote, run `npx leetcode-capture-helper uninstall`.
+  It removes the helper's files, its browser registration and its saved settings, including `~/.config/leetcode-capture/settings.json`.
+  Delete `relay-server/data/captures.jsonl` too if it exists.
 - Any notes the optional vault feature wrote are ordinary files in your vault; delete them like any other file.
 - Data already sent to a provider you chose is held under that provider's own retention policy; see your account settings with that provider.
 

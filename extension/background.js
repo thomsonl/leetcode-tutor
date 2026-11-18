@@ -25,6 +25,7 @@ import { normalizeSettings } from "./shared/extension-settings.js";
 import { createHelperLauncher } from "./shared/helper-launcher.js";
 import { createSolvedService } from "./shared/solved.js";
 import { createNativeSetup } from "./shared/native-setup.js";
+import { registerUninstallPage } from "./shared/uninstall-page.js";
 
 const api = typeof browser !== "undefined" ? browser : chrome;
 const PANEL_PORT = "lc-tutor-panel";
@@ -392,3 +393,8 @@ if (api.permissions.onRemoved) {
 // only once either way).
 if (api.runtime.onInstalled) api.runtime.onInstalled.addListener(() => nativeSetup.reopenAfterReload());
 nativeSetup.reopenAfterReload();
+
+// When the extension is removed from the browser's own extensions page, the
+// browser opens this page: how to remove the helper, which the extension
+// cannot do from inside a removal (shared/uninstall-page.js).
+registerUninstallPage(api.runtime);

@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HOST_NAME, GECKO_ID } from './config.js';
-import { install, layout, status, uninstall } from './install.js';
+import { install, layout, npxCacheFolder, status, uninstall } from './install.js';
 import { parseArgs, run } from './cli.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -233,6 +233,46 @@ test('uninstall also removes what the helper wrote while it ran, and the saved s
   assert.equal(again.nothing, false);
   assert.deepEqual(tree(home).filter((p) => p.includes('leetcode')), []);
   assert.equal(uninstall({ platform: 'linux', home, env: {} }).nothing, true);
+});
+
+// A fake npx cache folder: <home>/.npm/_npx/<hash>/node_modules/leetcode-capture-helper
+function fakeNpxCache(home, dependencies, hash = 'abc123') {
+  const hashDir = path.join(home, '.npm', '_npx', hash);
+  const app = path.join(hashDir, 'node_modules', 'leetcode-capture-helper');
+  for (const rel of ['companion/companion.js', 'relay-server/server.js']) {
+    fs.mkdirSync(path.dirname(path.join(app, 'runtime', rel)), { recursive: true });
+    fs.writeFileSync(path.join(app, 'runtime', rel), '');
+  }
+  fs.writeFileSync(path.join(app, 'cli.js'), '');
+  fs.writeFileSync(path.join(hashDir, 'package.json'), JSON.stringify({ dependencies }));
+  return { hashDir, app };
+}
+
+test("uninstall also removes the npx cache folder the helper ran from, when it holds only the helper", (t) => {
+  const home = tempHome(t);
+  const { hashDir, app } = fakeNpxCache(home, { 'leetcode-capture-helper': '^0.1.5' });
+  install({ platform: 'linux', home, env: {}, root: path.join(app, 'runtime'), chromeIds: [ID], browsers: ['chromium'] });
+  const result = uninstall({ platform: 'linux', home, env: {}, appDir: app });
+  assert.deepEqual(result.leftover, []);
+  assert.equal(fs.existsSync(hashDir), false, 'the npx folder is gone');
+  assert.equal(fs.existsSync(path.join(home, '.npm', '_npx')), true, 'npx\'s own cache folder stays');
+  // With nothing else registered, a second run also clears an npx folder an earlier run left.
+  const again = fakeNpxCache(home, { 'leetcode-capture-helper': '^0.1.5' }, 'def456');
+  assert.equal(uninstall({ platform: 'linux', home, env: {}, appDir: again.app }).nothing, false);
+  assert.equal(fs.existsSync(again.hashDir), false);
+});
+
+test('uninstall never deletes an npx folder that holds other packages, or a copy that is not in npx\'s cache', (t) => {
+  const home = tempHome(t);
+  const shared = fakeNpxCache(home, { 'leetcode-capture-helper': '^0.1.5', 'something-else': '^1.0.0' });
+  uninstall({ platform: 'linux', home, env: {}, appDir: shared.app });
+  assert.equal(fs.existsSync(shared.app), true);
+  const unreadable = fakeNpxCache(home, {}, 'nodeps');
+  fs.rmSync(path.join(unreadable.hashDir, 'package.json'));
+  uninstall({ platform: 'linux', home, env: {}, appDir: unreadable.app });
+  assert.equal(fs.existsSync(unreadable.app), true);
+  assert.equal(npxCacheFolder(REPO), null);
+  assert.equal(npxCacheFolder(path.join(home, '.npm', '_npx', 'abc123', 'node_modules', 'other-package')), null);
 });
 
 test('uninstall leaves a custom settings file alone and reports a folder it cannot remove', (t) => {
