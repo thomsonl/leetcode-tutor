@@ -680,7 +680,11 @@ function attemptLabel(capture) {
 // Makes problemId the active problem, resetting everything about the old one
 // when it changed (and AUTO_CLEAR_CONTEXT is on). Runs inside the turn queue,
 // so a reset never lands in the middle of a backend call.
+// The problem last worked on: the one a fresh-start notice (a new mode or
+// prompt) is shown under, since a panel only shows what belongs to its own.
+let lastProblemSlug = null;
 function activateProblem(problemId, slug) {
+  if (slug) lastProblemSlug = slug;
   const result = ledger.activate(problemId, { slug, resetOnSwitch: effective.options.autoClearContext });
   if (!result.reset) return result;
   backend.resetContext();
@@ -2135,10 +2139,10 @@ function applySettings(nextEffective, nextBackend, why = 'save') {
       )
     );
     // The panel forgets its transcripts too, as it does for a new problem.
-    if (fresh && panelBridge) {
+    if (fresh && panelBridge && lastProblemSlug) {
       panelPublish({
         type: 'notice',
-        problemSlug: null,
+        problemSlug: lastProblemSlug,
         text: modeChanged ? `Switched to ${effective.mode === 'interviewer' ? 'Interviewer' : 'Tutor'} mode. Started a fresh conversation.` : 'Prompt changed. Started a fresh conversation.',
         switch: true,
       });

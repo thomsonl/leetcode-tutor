@@ -619,3 +619,91 @@ test('the worker hears whether a provider is saved at all, so it does not start 
   assert.equal(saved.ok, true);
   assert.deepEqual(calls.at(-1), ['helper', true]);
 });
+
+// ---- the Tutor | Interviewer switch and the editable prompts ----------------
+
+async function chatted() {
+  const made = await setup({ stored: { [SETTINGS_KEY]: LOCAL } });
+  const port = fakePort();
+  made.service.connectPort(port);
+  port.send({ type: 'subscribe', after: 0 });
+  await settle(made.service);
+  port.send({ type: 'message', id: 1, text: 'What does this problem ask?', problemSlug: 'two-sum', snapshot: { code: code1, language: 'python3' } });
+  await settle(made.service);
+  return { ...made, port };
+}
+
+test('switching mode builds a new backend, starts the chat over, tells the panel, and forgets the old transcript', async () => {
+  const { service, storage, backends, port } = await chatted();
+  const before = backends.built.length;
+  assert.ok(port.events().some((e) => e.type === 'turn-end'), 'there is a chat to start over');
+  port.send({ type: 'switch-mode', reqId: 'm1', mode: 'interviewer' });
+  await settle(service);
+  assert.deepEqual(port.received.filter((m) => m.type === 'switch-result').at(-1), { type: 'switch-result', reqId: 'm1', ok: true, runtime: 'extension' });
+  assert.equal(storage.data[SETTINGS_KEY].mode, 'interviewer');
+  assert.equal(backends.built.length, before + 1, 'a new backend carries the new instructions');
+  const notice = port.events().filter((e) => e.type === 'notice').at(-1);
+  assert.equal(notice.switch, true, 'the panel starts a fresh session');
+  assert.match(notice.text, /Switched to Interviewer mode\. Started a fresh conversation\./);
+  assert.equal(port.events().filter((e) => e.type === 'config').at(-1).mode, 'interviewer');
+  // A panel that connects now replays nothing of the old chat.
+  const late = fakePort();
+  service.connectPort(late);
+  late.send({ type: 'subscribe', after: 0 });
+  await settle(service);
+  assert.deepEqual(late.events().filter((e) => e.type !== 'config' && e.type !== 'status').map((e) => e.type), ['notice']);
+  // The next message goes to the new backend and carries the full code again.
+  port.send({ type: 'message', id: 2, text: 'Where do I start?', problemSlug: 'two-sum', snapshot: { code: code1, language: 'python3' } });
+  await settle(service);
+  const fresh = backends.built.at(-1);
+  assert.equal(fresh.calls.length, 1);
+  assert.match(fresh.calls[0].text, /Where do I start\?/);
+  assert.equal(fresh.calls[0].options.currentCode.code, code1, 'the code is sent in full, not as a diff');
+});
+
+test('the same mode again changes nothing, and an unknown mode is refused', async () => {
+  const { service, storage, backends, port } = await chatted();
+  const before = backends.built.length;
+  port.send({ type: 'switch-mode', reqId: 'a', mode: 'tutor' });
+  port.send({ type: 'switch-mode', reqId: 'b', mode: 'pirate' });
+  await settle(service);
+  const results = port.received.filter((m) => m.type === 'switch-result');
+  assert.deepEqual(results[0], { type: 'switch-result', reqId: 'a', ok: true, runtime: 'extension', unchanged: true });
+  assert.equal(results[1].ok, false);
+  assert.equal(results[1].code, 'unknown');
+  assert.equal(backends.built.length, before, 'no new backend');
+  assert.ok(!port.events().some((e) => e.type === 'notice'), 'no fresh start');
+  assert.equal(storage.data[SETTINGS_KEY].mode ?? 'tutor', 'tutor');
+});
+
+test('saving a new prompt starts a fresh chat; saving something else keeps it', async () => {
+  const { service, storage, backends, port } = await chatted();
+  const before = backends.built.length;
+  await service.handleMessage({ type: 'lc-tutor:settings-save', params: { patch: { options: { autoClearContext: false } } } }, OPTIONS_PAGE);
+  await settle(service);
+  assert.equal(backends.built.length, before, 'an option alone keeps the backend');
+  assert.ok(!port.events().some((e) => e.type === 'notice'));
+  const saved = await service.handleMessage({ type: 'lc-tutor:settings-save', params: { patch: { prompts: { tutor: 'Be terse. Ask one question per reply and never give code.' } } } }, OPTIONS_PAGE);
+  assert.equal(saved.ok, true);
+  await settle(service);
+  assert.equal(backends.built.length, before + 1);
+  assert.equal(port.events().filter((e) => e.type === 'notice').at(-1).text, 'Prompt changed. Started a fresh conversation.');
+  assert.equal(storage.data[SETTINGS_KEY].prompts.tutor, 'Be terse. Ask one question per reply and never give code.');
+  const refused = await service.handleMessage({ type: 'lc-tutor:settings-save', params: { patch: { prompts: { tutor: 'tiny' } } } }, OPTIONS_PAGE);
+  assert.equal(refused.ok, false);
+  assert.match(refused.error.message, /at least/);
+});
+
+test('the helper confirming a mode switch only records it, and builds nothing', async () => {
+  const { service, storage, backends } = await setup({ stored: { [SETTINGS_KEY]: { provider: 'claude', runtime: 'helper' } } });
+  const port = fakePort();
+  service.connectPort(port);
+  await settle(service);
+  port.send({ type: 'mode-switched', mode: 'interviewer' });
+  await settle(service);
+  assert.equal(storage.data[SETTINGS_KEY].mode, 'interviewer');
+  assert.equal(backends.built.length, 0);
+  port.send({ type: 'mode-switched', mode: 'pirate' });
+  await settle(service);
+  assert.equal(storage.data[SETTINGS_KEY].mode, 'interviewer', 'junk is ignored');
+});

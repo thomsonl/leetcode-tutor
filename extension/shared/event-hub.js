@@ -89,6 +89,13 @@ export function createEventHub({ epoch = randomEpoch(), maxEvents = MAX_BUFFERED
       return before - events.length;
     },
 
+    // Forgets every buffered event (a new mode or prompt starts the whole
+    // conversation again), so what a reload replays matches the fresh start.
+    clear() {
+      events = [];
+      openTurns.clear();
+    },
+
     setBusy(next) {
       if (busy === Boolean(next)) return;
       busy = Boolean(next);
@@ -98,7 +105,7 @@ export function createEventHub({ epoch = randomEpoch(), maxEvents = MAX_BUFFERED
     // The non-secret summary of what the tutor runs on ({ provider, label,
     // model }), for the panel header.
     setConfig(next) {
-      config = next ? { type: 'config', provider: next.provider, label: next.label, model: next.model ?? null } : null;
+      config = next ? { type: 'config', provider: next.provider, label: next.label, model: next.model ?? null, mode: next.mode ?? 'tutor' } : null;
       if (config) broadcast(config);
     },
 

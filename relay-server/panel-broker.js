@@ -20,6 +20,7 @@
 //   POST /panel/drop-problem        companion { problemSlug }: forget that problem's buffered events
 //   POST /panel/trim-captures       companion { before, path }: drop the capture log's first `before` bytes
 //   POST /panel/activity            companion { busy }: the tutor is working on (or has queued) a turn
+//   POST /panel/switch-mode         panel     { mode }: the Tutor | Interviewer switch
 //   POST /panel/rpc-result          companion { id, response }: the answer to a settings call
 //   POST /settings/rpc              options   { method, params }: a settings call for the companion
 //
@@ -222,6 +223,8 @@ function sanitizeConfig(raw) {
   // What the tutor needs from the student before it can answer: only
   // "signin" (its subscription CLI is not signed in), left out otherwise.
   if (raw.attention === "signin") config.attention = "signin";
+  // The mode the tutor is in: only "tutor" or "interviewer", "tutor" when absent.
+  config.mode = raw.mode === "interviewer" ? "interviewer" : "tutor";
   return config;
 }
 
@@ -487,7 +490,8 @@ function createPanelBroker({ port, captureLog = null, rpcTimeoutMs = RPC_TIMEOUT
       const result = response.result || {};
       const active = sanitizeConfig(result.active);
       const body = { ok: true, profile: typeof result.profile === "string" && PROFILE_ID_RE.test(result.profile) ? result.profile : null };
-      if (active) body.active = { provider: active.provider, label: active.label, model: active.model };
+      if (active) body.active = { provider: active.provider, label: active.label, model: active.model, mode: active.mode };
+      if (result.mode === "tutor" || result.mode === "interviewer") body.mode = result.mode;
       return [200, body];
     }
     const error = response.error || {};
@@ -651,6 +655,21 @@ function createPanelBroker({ port, captureLog = null, rpcTimeoutMs = RPC_TIMEOUT
           return;
         }
         forwardRpc(req, res, "switchProfile", { id }, switchAnswer, switchTimeoutMs);
+      });
+      return true;
+    }
+
+    // The Tutor | Interviewer switch: like the model switcher, a panel (and so
+    // any script on leetcode.com) may make it, and only one of two fixed words
+    // goes on. It changes nothing but the mode, and starts the chat over.
+    if (route === "POST /panel/switch-mode") {
+      readBody(req, res, 4096, (body) => {
+        const mode = body && body.mode;
+        if (mode !== "tutor" && mode !== "interviewer") {
+          sendJson(req, res, 400, { ok: false, error: { code: "invalid", message: "`mode` must be \"tutor\" or \"interviewer\"" } });
+          return;
+        }
+        forwardRpc(req, res, "switchMode", { mode }, switchAnswer, switchTimeoutMs);
       });
       return true;
     }

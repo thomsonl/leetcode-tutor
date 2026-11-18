@@ -29,7 +29,7 @@ import {
 import { checkCodexLogin } from './codex-backend.js';
 import { isSignInError, signInMessage } from './sign-in.js';
 import { PROFILE_ID_RE, findProfile } from '../extension/shared/profiles.js';
-import { CONNECTION_TEST_PROMPT as TEST_PROMPT } from '../extension/shared/tutor-prompt.js';
+import { CONNECTION_TEST_PROMPT as TEST_PROMPT, MODES, normalizeMode } from '../extension/shared/tutor-prompt.js';
 
 const TEST_TIMEOUT_MS = 90_000;
 const MODELS_TIMEOUT_MS = 6000;
@@ -150,6 +150,34 @@ export function createSettingsRpc(deps) {
     return { active: statusSummary(effective), profile: id };
   }
 
+  // The Tutor | Interviewer switch. Like switchProfile it can change nothing
+  // but one saved setting (the mode, one of two fixed words), so whoever may
+  // call it can at most flip between the two. The new backend carries the new
+  // instructions and the conversation starts over (companion.js applySettings
+  // sees the prompt key change). Resolves once the swap has happened.
+  async function switchMode({ mode }) {
+    if (typeof mode !== 'string' || !MODES.includes(mode)) {
+      throw Object.assign(new SettingsError('That mode does not exist.', 'mode'), { code: 'unknown' });
+    }
+    const stored = deps.getStored();
+    const current = resolveEffective(stored, deps.env);
+    if (normalizeMode(stored.mode) === mode) return { active: statusSummary(current), mode };
+    const next = applyPatch(stored, { mode });
+    const effective = resolveEffective(next, deps.env);
+    const problem = missingRequirement(effective);
+    if (problem) throw Object.assign(new SettingsError(`${problem}. Open Settings to finish setting it up.`, 'mode'), { code: 'unavailable' });
+    let backend;
+    try {
+      backend = await deps.buildBackend(effective);
+    } catch (err) {
+      throw Object.assign(new SettingsError(scrub(err.message, [effective.apiKey]), 'mode'), { code: 'unavailable' });
+    }
+    saveSettings(next, deps.file);
+    deps.setStored(next);
+    await deps.apply(effective, backend, 'switch');
+    return { active: statusSummary(effective), mode };
+  }
+
   // Tries a draft (the saved settings with the page's unsaved edits on top).
   async function test(params) {
     const result = await runTest(params);
@@ -222,7 +250,7 @@ export function createSettingsRpc(deps) {
     }
   }
 
-  const METHODS = { get, save, test, models, setProfiles, switchProfile };
+  const METHODS = { get, save, test, models, setProfiles, switchProfile, switchMode };
 
   // Single entry point used by the bridge. Never throws: the result is always
   // { ok: true, result } or { ok: false, error: { message, field } }.
