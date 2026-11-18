@@ -3715,12 +3715,26 @@
   let wantedMode = null; // the extension's saved mode, as the worker reports it
   let switchingMode = null; // the mode being switched to
   let reconciledMode = null; // a mode the panel already asked the companion to take
+  // A mode a switch just confirmed, shown until the tutor's own config event
+  // says the same (that event can arrive after the answer to the switch, and
+  // the pressed button must not flick back to the old mode meanwhile). It
+  // lapses on its own if no event ever agrees.
+  let confirmedMode = null;
+  let confirmedTimer = 0;
+  function confirmMode(mode) {
+    confirmedMode = mode;
+    clearTimeout(confirmedTimer);
+    confirmedTimer = setTimeout(() => {
+      confirmedMode = null;
+      scheduleRender();
+    }, 8000);
+  }
 
-  // What the tutor is in now: the mode being switched to, else what the
-  // tutor reported, else what the extension has saved.
+  // What the tutor is in now: the mode being switched to, else the one just
+  // confirmed, else what the tutor reported, else what the extension has saved.
   function currentMode() {
     const config = state.companionOnline ? state.displayConfig : null;
-    return switchingMode || (config && config.mode) || wantedMode || "tutor";
+    return switchingMode || confirmedMode || (config && config.mode) || wantedMode || "tutor";
   }
 
   async function relayModeSwitch(mode) {
@@ -3762,8 +3776,10 @@
       } else {
         result = await workerRequest("switch-mode", { mode });
       }
-      if (result.ok) wantedMode = mode;
-      else showHint(result.message || "Couldn't switch modes.");
+      if (result.ok) {
+        wantedMode = mode;
+        confirmMode(mode);
+      } else showHint(result.message || "Couldn't switch modes.");
     } catch {
       showHint("Couldn't switch modes. Try again.");
     } finally {
@@ -3895,7 +3911,11 @@
       setTimeout(() => chooseProfile(id, { followUp: true }), 0);
     }
     if (event.type === "config" && transport === relayTransport && typeof event.profile === "string") noteCompanionProfile(event.profile);
-    if (event.type === "config" && transport === relayTransport) reconcileMode(event.mode === "interviewer" ? "interviewer" : "tutor");
+    if (event.type === "config") {
+      const reported = event.mode === "interviewer" ? "interviewer" : "tutor";
+      if (confirmedMode && reported === confirmedMode) confirmedMode = null;
+      if (transport === relayTransport) reconcileMode(reported);
+    }
     const affected = applyEvent(state, event);
     if (event.type === "turn-end" && !suppressUnread && !active && affected === currentSlug()) setUnread(true);
     noteApplied(affected);

@@ -416,6 +416,91 @@ try {
     check(!(await page.eval(`window.__posted.some((m) => m.type === 'profile-switched' && m.id === 'haiku' && window.__posted.indexOf(m) > window.__posted.findIndex((x) => x.type === 'profile-switched' && x.id === 'sonnet'))`)), 'nor tells the worker');
     await page.eval(`window.__switchStatus = 200`);
   });
+
+  // ---- the Tutor | Interviewer switch through both transports -------------------
+  const modeText = () => page.eval(`window.__qa('.mode-opt').map((b) => b.textContent + (b.getAttribute('aria-pressed') === 'true' ? '*' : '') + (b.disabled ? '(off)' : '')).join(' ')`);
+
+  await scenario('the helper runtime: the mode switch goes through the relay as one word, and the worker hears of it', async () => {
+    await page.eval(`window.__toPanel({ type: 'runtime', runtime: 'helper', chosen: true, mode: 'tutor' })`);
+    await page.eval(`window.__event({ type: 'status', companionOnline: true, busy: false, epoch: 'r1', openTurns: [] })`);
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'claude-sonnet-5', profile: 'sonnet', mode: 'tutor', epoch: 'r1' })`);
+    await settle();
+    check((await modeText()) === 'Tutor* Interviewer', `starts on the tutor: ${await modeText()}`);
+    await page.eval(`(() => { window.__modeDelayMs = 400; window.__modeBody = { ok: true, mode: 'interviewer' }; window.__modeStatus = 200; })()`);
+    await page.eval(`window.__qa('.mode-opt')[1].click()`);
+    await settle();
+    check((await modeText()) === 'Tutor(off) Interviewer*(off)', `held still while the companion swaps: ${await modeText()}`);
+    await page.waitFor(`window.__qa('.mode-opt').every((b) => !b.disabled)`, { what: 'the switch to land' });
+    check((await modeText()) === 'Tutor Interviewer*', `chosen: ${await modeText()}`);
+    check((await page.eval(`JSON.stringify(window.__modeSwitches)`)) === '[{"mode":"interviewer"}]', 'only the one word is posted');
+    check(await page.eval(`window.__posted.some((m) => m.type === 'mode-switched' && m.mode === 'interviewer')`), 'the worker hears of it');
+    check(!(await page.eval(`window.__posted.some((m) => m.type === 'switch-mode')`)), 'not through the worker');
+    // The companion's own config event confirms it.
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'claude-sonnet-5', profile: 'sonnet', mode: 'interviewer', epoch: 'r1' })`);
+    await settle();
+    check((await modeText()) === 'Tutor Interviewer*', 'still the interviewer');
+    check((await page.eval(`window.__q('textarea').placeholder`)) === 'Reply to the interviewer', 'the input says who it talks to');
+    await page.screenshot(path.join(SHOTS, '07-mode-interviewer.png'), { width: 1100, height: 760 });
+  });
+
+  await scenario('a refusal or an offline helper is shown, and the mode stays what it was', async () => {
+    await page.eval(`(() => { window.__modeDelayMs = 0; window.__modeStatus = 409; window.__modeBody = { ok: false, error: { code: 'unavailable', message: 'The model server is not reachable.' } }; })()`);
+    await page.eval(`window.__qa('.mode-opt')[0].click()`);
+    await page.waitFor(`!window.__q('.hint').hidden`, { what: 'the refusal' });
+    check(/model server is not reachable/.test(await page.eval(`window.__q('.hint').textContent`)), 'the reason is shown');
+    await page.waitFor(`window.__qa('.mode-opt').every((b) => !b.disabled)`, { what: 'the buttons to come back' });
+    check((await modeText()) === 'Tutor Interviewer*', `unchanged: ${await modeText()}`);
+    await page.eval(`(() => { window.__modeStatus = 503; window.__modeBody = { ok: false, error: { message: 'companion offline' } }; })()`);
+    await page.eval(`window.__qa('.mode-opt')[0].click()`);
+    await page.waitFor(`/isn't running/.test(window.__q('.hint').textContent)`, { what: 'the offline note' });
+    await page.waitFor(`window.__qa('.mode-opt').every((b) => !b.disabled)`, { what: 'the buttons to come back' });
+    check((await modeText()) === 'Tutor Interviewer*', `unchanged: ${await modeText()}`);
+    await page.eval(`window.__modeStatus = 200; window.__modeBody = { ok: true }`);
+  });
+
+  await scenario('a helper that is in another mode than the extension is asked once to follow', async () => {
+    // The extension's saved mode is the tutor (the worker says so), the helper reports the interviewer.
+    await page.eval(`window.__modeSwitches = []; window.__toPanel({ type: 'runtime', runtime: 'helper', chosen: true, mode: 'tutor' })`);
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'claude-sonnet-5', profile: 'sonnet', mode: 'interviewer', epoch: 'r1' })`);
+    await settle();
+    await page.waitFor(`window.__modeSwitches.length === 1`, { what: 'the one request to follow' });
+    check((await page.eval(`JSON.stringify(window.__modeSwitches)`)) === '[{"mode":"tutor"}]', 'it asks for the extension\'s mode');
+    // Reporting the same thing again does not ask again.
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'claude-sonnet-5', profile: 'sonnet', mode: 'interviewer', epoch: 'r1' })`);
+    await settle();
+    await new Promise((r) => setTimeout(r, 300));
+    check((await page.eval(`window.__modeSwitches.length`)) === 1, 'asked only once');
+    // When the helper then agrees, nothing more is asked, and another panel's change is not undone.
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'claude-sonnet-5', profile: 'sonnet', mode: 'tutor', epoch: 'r1' })`);
+    await settle();
+    check((await modeText()) === 'Tutor* Interviewer', `follows the helper's report: ${await modeText()}`);
+    check((await page.eval(`window.__modeSwitches.length`)) === 1, 'still one request');
+  });
+
+  await scenario('the browser runtime: the mode switch goes through the worker and its answer decides', async () => {
+    await page.eval(`window.__toPanel({ type: 'runtime', runtime: 'extension', chosen: true, mode: 'tutor' })`);
+    await page.eval(`window.__posted.length = 0`);
+    await page.eval(`window.__workerEvent({ type: 'config', provider: 'local', label: 'Local model', model: 'gpt-oss:20b', mode: 'tutor' })`);
+    await settle();
+    await page.eval(`window.__qa('.mode-opt')[1].click()`);
+    await settle();
+    const request = await page.eval(`window.__posted.find((m) => m.type === 'switch-mode')`);
+    check(request && request.mode === 'interviewer' && typeof request.reqId === 'number', `posted: ${JSON.stringify(request)}`);
+    check((await modeText()) === 'Tutor(off) Interviewer*(off)', `held still: ${await modeText()}`);
+    await page.eval(`window.__toPanel({ type: 'switch-result', reqId: ${request.reqId}, ok: true, runtime: 'extension' })`);
+    await page.waitFor(`window.__qa('.mode-opt').every((b) => !b.disabled)`, { what: 'the answer' });
+    check((await modeText()) === 'Tutor Interviewer*', `chosen: ${await modeText()}`);
+    // A refusal from the worker is shown and nothing changes.
+    await page.eval(`window.__posted.length = 0`);
+    await page.eval(`window.__toPanel({ type: 'runtime', runtime: 'extension', chosen: true, mode: 'interviewer' })`);
+    await page.eval(`window.__qa('.mode-opt')[0].click()`);
+    await settle();
+    const second = await page.eval(`window.__posted.find((m) => m.type === 'switch-mode')`);
+    await page.eval(`window.__toPanel({ type: 'switch-result', reqId: ${second.reqId}, ok: false, code: 'failed', message: 'Could not switch.' })`);
+    await page.waitFor(`/Could not switch\\./.test(window.__q('.hint').textContent)`, { what: 'the refusal' });
+    await page.waitFor(`window.__qa('.mode-opt').every((b) => !b.disabled)`, { what: 'the buttons to come back' });
+    check((await modeText()) === 'Tutor Interviewer*', `unchanged: ${await modeText()}`);
+  });
 } finally {
   await browser.close();
   server.close();

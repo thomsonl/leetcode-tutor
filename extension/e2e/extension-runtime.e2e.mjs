@@ -265,7 +265,9 @@ try {
     model.script.push('You are welcome.');
     await page.eval(`window.__send('thanks')`);
     await page.waitFor(`window.__replies().at(-1) === 'You are welcome.'`, { what: 'the next reply', timeout: 15000 });
-    const history = JSON.stringify(model.requests.at(-1).body.messages);
+    // The conversation, not the system prompt (which quotes "hash map" as an
+    // example of a leaking question).
+    const history = JSON.stringify(model.requests.at(-1).body.messages.filter((m) => m.role !== 'system'));
     check(history.includes('What does your loop do with each number it reads?') && !history.includes('hash map'), 'history holds the shown hint only');
     check(!history.includes('\u2014') && !history.includes('To fix this') && !history.includes('breaks the tutoring rules'), 'history holds the repaired chat reply and no re-ask');
   });

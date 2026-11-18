@@ -1747,16 +1747,19 @@
     ext = res.result;
     promptDrafts[mode] = savedPrompt(mode);
     renderPrompts();
-    const note = await mirrorPromptsToHelper();
+    const note = await mirrorPromptsToHelper((text) => showResult("prompt-result", "", text));
     showResult("prompt-result", "ok", `${reset ? "Reset to the default." : "Saved."} A new conversation starts in the Tutor tab.${note ? ` ${note}` : ""}`);
   }
 
   // Gives the helper's tutor the same mode and prompts. Quiet when there is
-  // no helper to tell; otherwise returns a note when it could not be done.
-  async function mirrorPromptsToHelper() {
-    if (!helper) return "";
+  // no helper in use; otherwise returns a note when it could not be done. When
+  // the tutor runs through the helper but it is not running (it only runs
+  // while a LeetCode problem is open), it is started first, as Save does.
+  async function mirrorPromptsToHelper(note) {
+    if (!helper && ext.settings.runtime !== "helper") return "";
     const prompts = ext.settings.prompts || {};
-    const res = await rpc("save", { patch: { mode: ext.settings.mode, prompts: { tutor: prompts.tutor || null, interviewer: prompts.interviewer || null } } });
+    const patch = { mode: ext.settings.mode, prompts: { tutor: prompts.tutor || null, interviewer: prompts.interviewer || null } };
+    const res = helper ? await rpc("save", { patch }) : await rpcStarting("save", { patch }, undefined, note);
     if (res.ok) {
       helper = res.result;
       return "";

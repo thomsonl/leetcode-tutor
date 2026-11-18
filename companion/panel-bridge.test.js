@@ -1173,7 +1173,7 @@ test('end to end: the panel switches between saved models through the relay, aft
   release();
   const res = await pending;
   assert.equal(res.status, 200, res.text);
-  assert.deepEqual(JSON.parse(res.text), { ok: true, profile: 'b', active: { provider: 'local', label: 'Local model', model: 'model-b' } });
+  assert.deepEqual(JSON.parse(res.text), { ok: true, profile: 'b', active: { provider: 'local', label: 'Local model', model: 'model-b', mode: 'tutor' } });
   await until(() => turnEnds() === 2, 5000, 'the slow reply to end in the panel');
   assert.equal(requests[1].model, 'model-a', 'the running reply stayed on the first model');
   const onDisk = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
