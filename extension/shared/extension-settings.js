@@ -21,7 +21,7 @@
 
 import { PROVIDERS, OLLAMA_BASE_URL, OPENAI_BASE_URL, defaultRuntime } from './providers.js';
 import { LocalBackend } from './local-backend.js';
-import { DEFAULT_PROMPTS, MAX_PROMPT_CHARS, MODES, PromptError, normalizeMode, normalizePrompts, systemMessageFor } from './tutor-prompt.js';
+import { DEFAULT_PROMPTS, FIXED_RULES, MAX_PROMPT_CHARS, MODES, PromptError, normalizeMode, normalizePrompts, systemMessageFor } from './tutor-prompt.js';
 import { AnthropicBackend, ANTHROPIC_BASE_URL, DEFAULT_ANTHROPIC_MODEL } from './anthropic-backend.js';
 import { ProfileError, cleanActiveProfile, cleanProfiles, findProfile, migrateProfiles, profileName } from './profiles.js';
 
@@ -412,6 +412,7 @@ export function publicView(settings, secrets) {
     prompts: { ...s.prompts },
     promptDefaults: { ...DEFAULT_PROMPTS },
     promptMaxChars: MAX_PROMPT_CHARS,
+    promptFixed: FIXED_RULES,
     defaults: { local: { ...DEFAULT_FIELDS.local }, openai: { ...DEFAULT_FIELDS.openai }, anthropic: { model: DEFAULT_ANTHROPIC_MODEL } },
   };
 }

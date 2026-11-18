@@ -145,6 +145,26 @@ input:disabled { opacity: 0.6; cursor: not-allowed; background: var(--fill); }
 
 .foot { color: var(--muted); font-size: 13px; line-height: 18px; }
 
+/* The Prompts card: two toggle tabs choose which prompt the editor shows,
+   the chosen one filled, like the Tutor panel's own mode switch. */
+.prompt-tabs { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line-strong); border-radius: 8px; }
+.prompt-tab { height: 28px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: 500 14px/20px inherit; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.prompt-tab:hover:not([aria-pressed="true"]) { color: var(--text); }
+.prompt-tab[aria-pressed="true"] { background: var(--fill); color: var(--text); cursor: default; }
+.prompt-tab .tag { margin-left: 0; background: var(--line); }
+.prompt-intro { margin: 12px 0 8px; color: var(--muted); }
+.prompt-text {
+  display: block; width: 100%; min-height: 320px; padding: 10px 12px; resize: vertical;
+  border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--text);
+  font: 400 13px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; tab-size: 2;
+}
+.prompt-text[aria-invalid="true"] { border-color: var(--red); }
+.prompt-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--muted); font-size: 13px; line-height: 18px; }
+.prompt-meta .over { color: var(--red); }
+.prompt-fixed { margin-top: 12px; color: var(--muted); font-size: 13px; line-height: 18px; }
+.prompt-fixed summary { cursor: pointer; width: max-content; }
+.prompt-fixed pre { margin: 8px 0 0; padding: 10px 12px; border-radius: 6px; background: var(--fill); white-space: pre-wrap; overflow-wrap: anywhere; font: 400 12px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+
 /* While a helper provider waits for the helper, what needs it is dimmed.
    The provider list stays usable (another provider may need no helper), the
    Helper card is how the helper gets set up, and the wait note says why. */

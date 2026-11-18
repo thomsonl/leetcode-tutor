@@ -1623,6 +1623,174 @@
     for (const key of Object.keys(keyAction)) if (key.startsWith(`${runtime}:`)) delete keyAction[key];
   }
 
+  // ---- prompts ------------------------------------------------------------------------
+  //
+  // The two prompts the Tutor panel's Tutor | Interviewer switch chooses
+  // between. The extension keeps them (ext.settings.prompts: the text the
+  // student wrote, or null for the default that ships with this version); the
+  // helper keeps a copy for its own tutor, brought in step after every save
+  // and whenever this page opens with the helper running.
+  //
+  // They have their own Save and Reset buttons, outside the form: a save
+  // starts a new conversation, so it is never a side effect of saving the
+  // model. The editor is drawn only when it has to be (on load, after a save,
+  // on choosing the other prompt), never by render(), which runs on a timer
+  // while the helper is waited for and would wipe what is being typed.
+
+  const PROMPT_MODES = [
+    ["tutor", "Tutor"],
+    ["interviewer", "Interviewer"],
+  ];
+  let promptMode = "tutor"; // the prompt the editor shows
+  const promptDrafts = {}; // mode -> the text in the editor
+
+  const promptDefault = (mode) => ext.settings.promptDefaults[mode];
+  const promptIsDefault = (mode) => !(ext.settings.prompts && ext.settings.prompts[mode]);
+  const savedPrompt = (mode) => (promptIsDefault(mode) ? promptDefault(mode) : ext.settings.prompts[mode]);
+  const promptLabel = (mode) => PROMPT_MODES.find(([id]) => id === mode)[1];
+
+  function updatePromptMeta() {
+    const mode = promptMode;
+    const text = promptDrafts[mode].replace(/\r\n?/g, "\n");
+    const max = ext.settings.promptMaxChars;
+    const dirty = text.trim() !== savedPrompt(mode).trim();
+    const state = dirty ? "Unsaved changes" : promptIsDefault(mode) ? "Default prompt" : "Edited prompt";
+    $("prompt-state").textContent = state;
+    const count = $("prompt-count");
+    count.textContent = `${text.length.toLocaleString()} / ${max.toLocaleString()}`;
+    count.classList.toggle("over", text.length > max);
+    $("prompt-text").setAttribute("aria-invalid", String(text.length > max));
+    $("prompt-save").disabled = !dirty || text.length > max;
+    // Nothing to reset when the saved prompt is the default and the editor
+    // already shows it.
+    $("prompt-reset").disabled = promptIsDefault(mode) && text.trim() === promptDefault(mode).trim();
+  }
+
+  function renderPrompts() {
+    const card = $("prompts-card");
+    if (!ext || !ext.settings || !ext.settings.promptDefaults) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    const mode = promptMode;
+    if (promptDrafts[mode] === undefined) promptDrafts[mode] = savedPrompt(mode);
+    const tabs = h(
+      "div",
+      { class: "prompt-tabs", role: "group", "aria-label": "Prompt to edit" },
+      ...PROMPT_MODES.map(([id, label]) =>
+        h(
+          "button",
+          {
+            type: "button",
+            class: "prompt-tab",
+            "aria-pressed": String(id === mode),
+            onclick: () => {
+              if (promptMode === id) return;
+              promptMode = id;
+              renderPrompts();
+            },
+          },
+          label,
+          ext.settings.mode === id ? h("span", { class: "tag", text: "In use" }) : null
+        )
+      )
+    );
+    const intro = h("p", {
+      class: "prompt-intro",
+      text:
+        mode === "interviewer"
+          ? "Plays a mock interviewer: it asks the questions, gives hints only when you ask, and ends with feedback when you Submit."
+          : "Guides you toward the solution yourself, with hints that grow one step at a time and never hand over the answer.",
+    });
+    const area = h("textarea", { id: "prompt-text", class: "prompt-text", spellcheck: "false", "aria-label": `${promptLabel(mode)} prompt`, "aria-describedby": "prompt-meta" });
+    area.value = promptDrafts[mode];
+    area.addEventListener("input", () => {
+      promptDrafts[mode] = area.value;
+      showResult("prompt-result", "", "");
+      updatePromptMeta();
+    });
+    const meta = h("div", { class: "prompt-meta", id: "prompt-meta" }, h("span", { id: "prompt-state" }), h("span", { id: "prompt-count" }));
+    const actions = h(
+      "div",
+      { class: "actions" },
+      h("button", { type: "button", id: "prompt-save", class: "btn primary", text: "Save prompt", onclick: () => savePrompt(mode, false) }),
+      h("button", { type: "button", id: "prompt-reset", class: "btn", text: "Reset to default", onclick: () => savePrompt(mode, true) }),
+      h("p", { id: "prompt-result", class: "result", role: "status", "aria-live": "polite" })
+    );
+    const fixed = h(
+      "details",
+      { class: "prompt-fixed" },
+      h("summary", { text: "Rules that always apply" }),
+      h("p", { text: "These are added after your prompt and can't be edited, so replies always draw diagrams and tables correctly." }),
+      h("pre", { text: ext.settings.promptFixed || "" })
+    );
+    $("prompts-body").replaceChildren(tabs, intro, area, meta, actions, fixed);
+    updatePromptMeta();
+  }
+
+  // Saves one prompt (or, with `reset`, puts it back to the default) in the
+  // extension, then in the helper's copy. A blank prompt, or one equal to the
+  // default, is stored as "the default".
+  async function savePrompt(mode, reset) {
+    const typed = reset ? "" : promptDrafts[mode].replace(/\r\n?/g, "\n").trim();
+    const value = !typed || typed === promptDefault(mode).trim() ? null : typed;
+    $("prompt-save").disabled = true;
+    $("prompt-reset").disabled = true;
+    showResult("prompt-result", "", "Saving...");
+    const res = await worker("lc-tutor:settings-save", { patch: { prompts: { [mode]: value } } });
+    if (!res.ok) {
+      updatePromptMeta();
+      showResult("prompt-result", "error", res.error.message);
+      return;
+    }
+    ext = res.result;
+    promptDrafts[mode] = savedPrompt(mode);
+    renderPrompts();
+    const note = await mirrorPromptsToHelper();
+    showResult("prompt-result", "ok", `${reset ? "Reset to the default." : "Saved."} A new conversation starts in the Tutor tab.${note ? ` ${note}` : ""}`);
+  }
+
+  // Gives the helper's tutor the same mode and prompts. Quiet when there is
+  // no helper to tell; otherwise returns a note when it could not be done.
+  async function mirrorPromptsToHelper() {
+    if (!helper) return "";
+    const prompts = ext.settings.prompts || {};
+    const res = await rpc("save", { patch: { mode: ext.settings.mode, prompts: { tutor: prompts.tutor || null, interviewer: prompts.interviewer || null } } });
+    if (res.ok) {
+      helper = res.result;
+      return "";
+    }
+    return `The helper app did not take it yet (${res.error.message}). It gets it the next time this page opens with the helper running.`;
+  }
+
+  // A helper whose mode or prompts differ from the extension's (it was off
+  // when they changed) is brought in step when this page opens.
+  async function reconcileHelperPrompts() {
+    if (!helper || !helper.settings || !ext || !ext.settings.prompts) return;
+    const theirs = helper.settings.prompts || {};
+    const mine = ext.settings.prompts;
+    const same = PROMPT_MODES.every(([id]) => (theirs[id] || null) === (mine[id] || null)) && (helper.settings.mode || "tutor") === (ext.settings.mode || "tutor");
+    if (!same) await mirrorPromptsToHelper();
+  }
+
+  // The "In use" tag follows the mode chosen in the Tutor tab while this page
+  // stays open; the editor itself is left alone.
+  async function refreshPromptTags() {
+    if (!ext || $("prompts-card").hidden) return;
+    const res = await worker("lc-tutor:settings-get");
+    if (!res.ok || !res.result.settings || res.result.settings.mode === ext.settings.mode) return;
+    ext.settings.mode = res.result.settings.mode;
+    const tabs = document.querySelectorAll(".prompt-tab");
+    PROMPT_MODES.forEach(([id], i) => {
+      const tab = tabs[i];
+      if (!tab) return;
+      const tag = tab.querySelector(".tag");
+      if (id === ext.settings.mode && !tag) tab.appendChild(h("span", { class: "tag", text: "In use" }));
+      if (id !== ext.settings.mode && tag) tag.remove();
+    });
+  }
+
   // ---- loading ------------------------------------------------------------------------
 
   // Only the header's "Sign-in needed" from the companion: a full loadHelper
@@ -1648,6 +1816,12 @@
   }
 
   async function load() {
+    await loadAll();
+    renderPrompts();
+    await reconcileHelperPrompts();
+  }
+
+  async function loadAll() {
     const res = await worker("lc-tutor:settings-get");
     if (!res.ok) {
       setConnection(false, "Extension error");
@@ -1724,6 +1898,7 @@
   // header asks the helper again rather than showing a stale state.
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && catalog && selected && runtimeOf(selected) === "helper") refreshAttention();
+    if (document.visibilityState === "visible") refreshPromptTags();
   });
   // Typing, choosing and toggling anywhere in the form but the Helper card
   // (setting up the helper changes nothing that Save saves).

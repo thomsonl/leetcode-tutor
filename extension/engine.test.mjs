@@ -155,7 +155,7 @@ test('a panel port gets the runtime, a replay, config and status, and a message 
   service.connectPort(port);
   port.send({ type: 'subscribe', after: 0 });
   await settle(service);
-  assert.deepEqual(port.received[0], { type: 'runtime', runtime: 'extension', chosen: true });
+  assert.deepEqual(port.received[0], { type: 'runtime', runtime: 'extension', chosen: true, mode: 'tutor' });
   const config = port.events().find((e) => e.type === 'config');
   assert.deepEqual([config.provider, config.label, config.model], ['local', 'Local model', 'model-a']);
   const status = port.events().find((e) => e.type === 'status');

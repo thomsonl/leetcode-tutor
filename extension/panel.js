@@ -275,6 +275,8 @@
         model: typeof event.model === "string" && event.model ? event.model : null,
         // The tutor's subscription is not signed in (companion/sign-in.js).
         attention: event.attention === "signin" ? "signin" : null,
+        // Tutor or Interviewer; anything else is the tutor.
+        mode: event.mode === "interviewer" ? "interviewer" : "tutor",
       };
       if (!hasOpenTurn(state)) state.displayConfig = state.config;
       return null;
@@ -1313,6 +1315,16 @@
     button.model:focus-visible { outline: 1px solid color-mix(in srgb, var(--fg) 45%, transparent); outline-offset: 0; }
     .provider { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     button.model svg { flex: none; }
+    /* The Tutor | Interviewer switch: two toggle buttons in one small outlined
+       group, the chosen one filled. It never shrinks (the status and the model
+       name give way first) and sits just left of the model button. */
+    .mode { flex: none; display: flex; align-items: center; gap: 2px; height: 22px; box-sizing: border-box; padding: 2px; border: 1px solid var(--line); border-radius: 6px; }
+    .mode[hidden] { display: none; }
+    button.mode-opt { flex: none; width: auto; height: 16px; padding: 0 8px; border-radius: 4px; color: var(--muted); font: 500 12px / 16px var(--font); white-space: nowrap; cursor: pointer; }
+    button.mode-opt:hover:not(:disabled):not([aria-pressed="true"]) { color: var(--fg); }
+    button.mode-opt[aria-pressed="true"] { color: var(--fg); background: var(--fill); cursor: default; }
+    button.mode-opt:disabled:not([aria-pressed="true"]) { opacity: 0.55; cursor: progress; }
+    button.mode-opt:focus-visible { outline: 1px solid color-mix(in srgb, var(--fg) 45%, transparent); outline-offset: 0; }
     .menu {
       position: absolute; z-index: 5; top: 30px; right: 8px; box-sizing: border-box;
       width: max-content; min-width: min(220px, calc(100% - 16px)); max-width: min(320px, calc(100% - 16px));
@@ -1847,7 +1859,29 @@
       '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>';
     progress.addEventListener("click", () => sendToWorker({ type: "lc-tutor:open-progress" }));
-    headRight.append(model, practice, progress, gear);
+    // The mode switch (see "The mode switch" below): toggle buttons, not a
+    // radio group, since choosing one starts a new conversation and moving
+    // between them with the arrow keys must not.
+    const modeGroup = el("div", "mode");
+    modeGroup.hidden = true;
+    modeGroup.setAttribute("role", "group");
+    modeGroup.setAttribute("aria-label", "Tutor mode");
+    const modeButtons = {};
+    for (const [id, label] of [
+      ["tutor", "Tutor"],
+      ["interviewer", "Interviewer"],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "mode-opt";
+      button.dataset.mode = id;
+      button.setAttribute("aria-pressed", "false");
+      button.textContent = label;
+      button.title = `${label} mode. Switching starts a new conversation.`;
+      modeButtons[id] = button;
+      modeGroup.appendChild(button);
+    }
+    headRight.append(modeGroup, model, practice, progress, gear);
     head.append(headLeft, headRight);
 
     const banner = el("div", "banner");
@@ -1932,7 +1966,8 @@
     // here must trigger neither, so keys stop at the host.
     for (const type of ["keydown", "keyup", "keypress"]) host.addEventListener(type, (e) => e.stopPropagation());
 
-    const p = { host, wrap, status, statusText, headRight, model, provider, menu, gear, practice, progress, banner, scroll, view, feed, box, input, send, hint, counter };
+    const p = { host, wrap, status, statusText, headRight, modeGroup, modeButtons, model, provider, menu, gear, practice, progress, banner, scroll, view, feed, box, input, send, hint, counter };
+    for (const [id, button] of Object.entries(modeButtons)) button.addEventListener("click", () => chooseMode(id));
     wireSwitcher(p);
     return p;
   }
@@ -2820,6 +2855,17 @@
     if (p.model.hidden && !p.menu.hidden) closeMenu(p, false);
     if (!p.menu.hidden) renderMenu(p);
 
+    // The mode switch shows whenever there is a tutor to switch, and is held
+    // still while a switch is under way.
+    if (p.modeGroup.hidden !== !providerText) p.modeGroup.hidden = !providerText;
+    const mode = currentMode();
+    for (const [id, button] of Object.entries(p.modeButtons)) {
+      const pressed = String(id === mode);
+      if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
+      const locked = Boolean(switchingMode);
+      if (button.disabled !== locked) button.disabled = locked;
+    }
+
     const practiceHidden = !slug || !messagingRuntime();
     if (p.practice.hidden !== practiceHidden) p.practice.hidden = practiceHidden;
     const progressHidden = !messagingRuntime();
@@ -2829,7 +2875,9 @@
     p.input.disabled = !canSend;
     p.send.disabled = !canSend || sending || !p.input.value.trim() || p.input.value.length > MAX_MESSAGE_CHARS;
     p.input.placeholder = canSend
-      ? "Ask the tutor about this problem"
+      ? mode === "interviewer"
+        ? "Reply to the interviewer"
+        : "Ask the tutor about this problem"
       : setupRestart
         ? "Finishing setup"
         : extensionGone
@@ -3632,7 +3680,9 @@
     );
   }
 
-  function workerSwitch(id) {
+  // One request to the worker that is answered with a 'switch-result' (the
+  // model switch and the mode switch share the wait).
+  function workerRequest(type, fields) {
     return new Promise((resolve, reject) => {
       const reqId = nextSwitchId++;
       const timer = setTimeout(() => {
@@ -3640,12 +3690,95 @@
         reject(new Error("timed out"));
       }, SWITCH_TIMEOUT_MS);
       pendingSwitches.set(reqId, { resolve, reject, timer });
-      if (!postToWorker({ type: "switch-profile", reqId, id })) {
+      if (!postToWorker({ type, reqId, ...fields })) {
         pendingSwitches.delete(reqId);
         clearTimeout(timer);
         reject(new Error("no worker"));
       }
     });
+  }
+
+  function workerSwitch(id) {
+    return workerRequest("switch-profile", { id });
+  }
+
+  // ---- the mode switch ---------------------------------------------------------
+  //
+  // Tutor or Interviewer, from the two buttons in the header. Choosing one
+  // starts a new conversation (the tutor's instructions change, and a chat
+  // held under the old ones would carry the old persona), which the worker or
+  // the helper's companion announces with a notice the panel handles like a
+  // new problem. Through the worker for the browser runtime, through the
+  // relay's POST /panel/switch-mode while the helper is in use. The mode is
+  // one setting for the whole browser, not per problem.
+
+  let wantedMode = null; // the extension's saved mode, as the worker reports it
+  let switchingMode = null; // the mode being switched to
+  let reconciledMode = null; // a mode the panel already asked the companion to take
+
+  // What the tutor is in now: the mode being switched to, else what the
+  // tutor reported, else what the extension has saved.
+  function currentMode() {
+    const config = state.companionOnline ? state.displayConfig : null;
+    return switchingMode || (config && config.mode) || wantedMode || "tutor";
+  }
+
+  async function relayModeSwitch(mode) {
+    const res = await fetch(`${RELAY_BASE}/panel/switch-mode`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(SWITCH_TIMEOUT_MS),
+    });
+    let body = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    if (res.status === 200 && body && body.ok) return { ok: true };
+    if (res.status === 503) return { ok: false, message: "The helper app isn't running, so the mode wasn't switched." };
+    if (res.status === 504) return { ok: false, message: "The switch is waiting for the tutor's current reply." };
+    const message = body && body.error && typeof body.error.message === "string" ? body.error.message : "Couldn't switch modes.";
+    return { ok: false, message };
+  }
+
+  async function chooseMode(mode) {
+    if (switchingMode || mode === currentMode()) return;
+    switchingMode = mode;
+    showHint("");
+    scheduleRender();
+    try {
+      let result;
+      if (transport === relayTransport) {
+        try {
+          result = await relayModeSwitch(mode);
+        } catch {
+          result = { ok: false, message: "The helper app didn't answer, so the mode wasn't switched." };
+        }
+        // The extension keeps the same setting, so both agree.
+        if (result.ok) postToWorker({ type: "mode-switched", mode });
+      } else {
+        result = await workerRequest("switch-mode", { mode });
+      }
+      if (result.ok) wantedMode = mode;
+      else showHint(result.message || "Couldn't switch modes.");
+    } catch {
+      showHint("Couldn't switch modes. Try again.");
+    } finally {
+      switchingMode = null;
+      scheduleRender();
+    }
+  }
+
+  // The helper's companion keeps its own copy of the mode. If it reports one
+  // other than the extension's (the mode was changed while the browser runtime
+  // was in use, then the helper took over), the panel asks it to follow, once.
+  function reconcileMode(companionMode) {
+    if (!wantedMode || switchingMode || companionMode === wantedMode || reconciledMode === wantedMode) return;
+    reconciledMode = wantedMode;
+    relayModeSwitch(wantedMode).catch(() => {});
   }
 
   async function relaySwitch(id) {
@@ -3762,6 +3895,7 @@
       setTimeout(() => chooseProfile(id, { followUp: true }), 0);
     }
     if (event.type === "config" && transport === relayTransport && typeof event.profile === "string") noteCompanionProfile(event.profile);
+    if (event.type === "config" && transport === relayTransport) reconcileMode(event.mode === "interviewer" ? "interviewer" : "tutor");
     const affected = applyEvent(state, event);
     if (event.type === "turn-end" && !suppressUnread && !active && affected === currentSlug()) setUnread(true);
     noteApplied(affected);
@@ -3958,6 +4092,7 @@
       }
       if (message.type === "runtime") {
         providerChosen = message.chosen !== false;
+        wantedMode = message.mode === "interviewer" ? "interviewer" : "tutor";
         useTransport(message.runtime === "extension" ? extensionTransport : relayTransport);
       } else if (message.type === "helper") {
         helperState = typeof message.state === "string" ? message.state : null;

@@ -34,6 +34,7 @@ import {
 } from '../extension/shared/profiles.js';
 import {
   DEFAULT_PROMPTS,
+  FIXED_RULES,
   MAX_PROMPT_CHARS,
   MODES,
   PromptError,
@@ -498,6 +499,7 @@ export function publicView(stored, env = process.env, file = settingsPath(env)) 
     prompts: effective.prompts,
     promptDefaults: { ...DEFAULT_PROMPTS },
     promptMaxChars: MAX_PROMPT_CHARS,
+    promptFixed: FIXED_RULES,
     catalog: Object.fromEntries(
       Object.entries(PROVIDERS).map(([id, p]) => [id, { label: p.label, hint: p.hint, fields: p.fields, requires: p.requires }])
     ),

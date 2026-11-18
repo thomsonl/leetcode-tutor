@@ -104,6 +104,10 @@ Code arrives in full or as a numbered diff (+ adds, - removes, ... skips) of the
 // The style and format rules below are always appended and cannot be edited
 // away, so a custom prompt can never break how replies are drawn.
 
+// What always follows the instructions, whatever the student wrote: shown
+// read-only in Settings.
+export const FIXED_RULES = `${STYLE_ADDENDUM}\n\n${FORMAT_ADDENDUM}`;
+
 export const MODES = ['tutor', 'interviewer'];
 export const DEFAULT_MODE = 'tutor';
 export const MODE_LABELS = { tutor: 'Tutor', interviewer: 'Interviewer' };
@@ -167,7 +171,7 @@ export function promptFor(mode, prompts) {
 // The full system message every backend sends: the mode's instructions plus
 // the style and formatting rules.
 export function systemMessageFor(mode = DEFAULT_MODE, prompts = null) {
-  return `${promptFor(mode, prompts)}\n\n${STYLE_ADDENDUM}\n\n${FORMAT_ADDENDUM}`;
+  return `${promptFor(mode, prompts)}\n\n${FIXED_RULES}`;
 }
 
 // The default tutor message (what a backend uses when it is given none).

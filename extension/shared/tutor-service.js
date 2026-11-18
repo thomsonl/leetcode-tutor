@@ -195,7 +195,7 @@ export function createTutorService({
   // `chosen`: whether a provider is chosen at all, so a panel with no helper
   // running can say to pick one rather than to start the helper.
   function runtimeMessage() {
-    return { type: 'runtime', runtime: runtimeFor(settings), chosen: Boolean(settings.provider) };
+    return { type: 'runtime', runtime: runtimeFor(settings), chosen: Boolean(settings.provider), mode: settings.mode };
   }
 
   function broadcast(message) {
@@ -339,6 +339,9 @@ export function createTutorService({
       await storage.set({ [SETTINGS_KEY]: next.settings });
       settings = next.settings;
     });
+    // Every other panel learns it too, so none of them later asks the helper
+    // to go back to the mode it knew.
+    broadcastRuntime();
   }
 
   // The helper's companion switched to a profile (the panel asked it through

@@ -651,11 +651,11 @@ test("a config event names the tutor's model in state and never touches a transc
   assert.equal(state.config, null);
   const affected = applyEvent(state, { type: "config", provider: "local", label: "Local model", model: "gpt-oss:20b", epoch: "e1" });
   assert.equal(affected, null);
-  assert.deepEqual(state.config, { provider: "local", label: "Local model", model: "gpt-oss:20b", attention: null });
+  assert.deepEqual(state.config, { provider: "local", label: "Local model", model: "gpt-oss:20b", attention: null, mode: "tutor" });
   assert.equal(state.byProblem.size, 0);
   assert.equal(state.lastSeq, 0, "a config event has no sequence number to count");
   applyEvent(state, { type: "config", provider: "claude", label: "Claude subscription", model: null });
-  assert.deepEqual(state.config, { provider: "claude", label: "Claude subscription", model: null, attention: null });
+  assert.deepEqual(state.config, { provider: "claude", label: "Claude subscription", model: null, attention: null, mode: "tutor" });
   // The subscription is not signed in: only that one value is kept.
   applyEvent(state, { type: "config", provider: "claude", label: "Claude subscription", model: null, attention: "signin" });
   assert.equal(state.config.attention, "signin");
@@ -663,6 +663,31 @@ test("a config event names the tutor's model in state and never touches a transc
   assert.equal(state.config.attention, null);
   applyEvent(state, { type: "config", provider: "x" });
   assert.equal(state.config.label, "Claude subscription", "a config without a label is ignored");
+});
+
+test("a config event carries the mode: the interviewer, or the tutor for anything else", () => {
+  const state = createState();
+  applyEvent(state, { type: "config", provider: "local", label: "Local model", model: null, mode: "interviewer" });
+  assert.equal(state.config.mode, "interviewer");
+  applyEvent(state, { type: "config", provider: "local", label: "Local model", model: null, mode: "pirate" });
+  assert.equal(state.config.mode, "tutor");
+  applyEvent(state, { type: "config", provider: "local", label: "Local model", model: null });
+  assert.equal(state.config.mode, "tutor", "a tutor from before modes is the tutor");
+});
+
+test("a switch notice (a new mode or prompt) drops every transcript and shows once something follows it", () => {
+  const state = createState();
+  applyEvent(state, { type: "user", problemSlug: "two-sum", text: "why does it fail?", seq: 1 });
+  applyEvent(state, { type: "turn-start", problemSlug: "two-sum", turnId: "t1", seq: 2 });
+  applyEvent(state, { type: "turn-end", problemSlug: "two-sum", turnId: "t1", text: "Because.", seq: 3 });
+  assert.ok(itemsFor(state, "two-sum").length > 0);
+  applyEvent(state, { type: "notice", problemSlug: "two-sum", text: "Switched to Interviewer mode. Started a fresh conversation.", switch: true, seq: 4 });
+  const items = itemsFor(state, "two-sum");
+  assert.deepEqual(items.map((i) => i.kind), ["notice"], "only the notice is left");
+  assert.equal(items[0].switchNotice, true);
+  assert.deepEqual(visibleItems(items), [], "shown only once something follows it");
+  applyEvent(state, { type: "user", problemSlug: "two-sum", text: "ready", seq: 5 });
+  assert.equal(visibleItems(itemsFor(state, "two-sum"))[0].text, "Switched to Interviewer mode. Started a fresh conversation.");
 });
 
 test("a reply remembers the message it answers, so a failed one can offer to send it again", () => {
