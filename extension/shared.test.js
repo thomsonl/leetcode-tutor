@@ -233,6 +233,10 @@ test("saved model profiles: bad entries are dropped on load and refused on save,
   assert.throws(() => cleanProfiles(raw, PROVIDERS, { strict: true }), ProfileError);
   assert.equal(profileName({ id: "c", provider: "claude", model: null, label: "Fast" }, PROVIDERS), "Fast");
   assert.equal(profileName({ id: "c", provider: "claude", model: null, label: null }, PROVIDERS), "Claude subscription");
+  // A Claude alias is named as the options page's dropdown names it; any other model as saved.
+  assert.equal(profileName({ id: "c", provider: "claude", model: "sonnet", label: null }, PROVIDERS), "Sonnet (latest)");
+  assert.equal(profileName({ id: "c", provider: "claude", model: "claude-haiku-5-5", label: null }, PROVIDERS), "claude-haiku-5-5");
+  assert.equal(profileName({ id: "c", provider: "local", model: "sonnet", label: null }, PROVIDERS), "sonnet");
   assert.deepEqual(migrateProfiles({ provider: null }), { profiles: [], activeProfile: null });
 
   const old = normalizeSettings({ provider: "local", providers: { local: { model: "gemma4:26b" } } });

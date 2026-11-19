@@ -1102,14 +1102,23 @@
     return defaults && defaults.model ? defaults.model : null;
   }
 
+  // A Claude alias is shown by its friendly name (the dropdown's), as the
+  // Tutor tab's menu shows it (shared/profiles.js keeps the same names).
+  function modelName(provider, model) {
+    const preset = provider === "claude" ? CLAUDE_PRESETS.find(([v]) => v && v === model) : null;
+    return preset ? preset[1] : model;
+  }
+
   function profileName(profile) {
-    return profile.label || profile.model || defaultModelOf(profile.provider) || (catalog[profile.provider] ? catalog[profile.provider].label : profile.provider);
+    const model = profile.model ? modelName(profile.provider, profile.model) : null;
+    return profile.label || model || defaultModelOf(profile.provider) || (catalog[profile.provider] ? catalog[profile.provider].label : profile.provider);
   }
 
   function profileMeta(profile) {
     const parts = [catalog[profile.provider] ? catalog[profile.provider].label : profile.provider];
     const model = profile.model || defaultModelOf(profile.provider);
-    if (model && model !== profileName(profile)) parts.push(model);
+    const shown = model ? modelName(profile.provider, model) : null;
+    if (shown && shown !== profileName(profile)) parts.push(shown);
     parts.push(runtimeOf(profile.provider) === "helper" ? "through the helper app" : "in the browser");
     return parts.join(" · ");
   }

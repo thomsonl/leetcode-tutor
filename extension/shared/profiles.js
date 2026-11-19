@@ -98,9 +98,21 @@ export function migrateProfiles({ profiles, activeProfile, provider, model }) {
   return { profiles: [profile], activeProfile: profile.id };
 }
 
+// The Claude subscription's models are Claude Code aliases that always mean
+// the newest of that kind, named as the options page's dropdown names them.
+export const CLAUDE_ALIAS_NAMES = { sonnet: 'Sonnet (latest)', opus: 'Opus (latest)', haiku: 'Haiku (latest)' };
+
+// The name of a model as people read it: the friendly name of a Claude alias,
+// otherwise the model as saved.
+export function modelName(provider, model) {
+  if (provider === 'claude' && Object.prototype.hasOwnProperty.call(CLAUDE_ALIAS_NAMES, model)) return CLAUDE_ALIAS_NAMES[model];
+  return model;
+}
+
 // What a profile is called in the switcher and the options page: its own
-// label, else its model, else its provider's label.
+// label, else its model (a Claude alias by its friendly name), else its
+// provider's label.
 export function profileName(profile, providers) {
   if (!profile) return '';
-  return profile.label || profile.model || (providers[profile.provider] && providers[profile.provider].label) || profile.provider;
+  return profile.label || (profile.model && modelName(profile.provider, profile.model)) || (providers[profile.provider] && providers[profile.provider].label) || profile.provider;
 }
