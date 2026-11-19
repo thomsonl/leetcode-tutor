@@ -668,7 +668,7 @@
 
   function activeLabel(active) {
     if (!active) return "";
-    return active.model ? `${active.label}, ${active.model}` : active.label;
+    return active.model ? `${active.label}, ${modelName(active.provider, active.model)}` : active.label;
   }
 
   // ---- rendering -----------------------------------------------------------------

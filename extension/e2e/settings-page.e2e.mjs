@@ -761,6 +761,7 @@ await scenario('the Claude subscription card: a dropdown of Claude Code model na
   const m = await page.eval(`(() => { const s = document.getElementById('claude-model'); return { tag: s.tagName, value: s.value, options: [...s.options].map((o) => o.textContent) }; })()`);
   assert.equal(m.tag, 'SELECT');
   assert.equal(m.value, 'opus', 'a saved alias is the selected one');
+  assert.equal(await text(page, '#connection-text'), 'Tutor running: Claude subscription, Opus (latest)', 'the header names the alias as the dropdown does');
   assert.deepEqual(m.options, ['Default', 'Sonnet (latest)', 'Opus (latest)', 'Haiku (latest)', 'Other (type a name)...']);
   await page.eval(`(() => { const s = document.getElementById('claude-model'); s.value = '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   assert.equal(await page.eval(`document.getElementById('claude-model').tagName`), 'INPUT', '"Other" turns it into a text box');
