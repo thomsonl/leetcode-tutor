@@ -345,3 +345,25 @@ test('the console check asks LeetCode for every slug and reports only the ones t
   assert.ok(requests.every((r) => r.url === '/graphql/' && r.init.headers['x-csrftoken'] === 'tok'));
   assert.equal(logs[0], `${data.problems.length} slugs checked, 2 differ`);
 });
+
+test('suggestions go breadth first: everything one step from the start before anything two steps away', async () => {
+  const { topicDepths } = await import('./shared/roadmap.js');
+  for (const list of [NEETCODE_150, NEETCODE_250]) {
+    const depth = topicDepths(list);
+    assert.equal(depth.get('arrays-hashing'), 0);
+    assert.equal(depth.get('two-pointers'), 1);
+    assert.equal(depth.get('stack'), 1, 'Stack follows Arrays & Hashing directly');
+    assert.equal(depth.get('sliding-window'), 2, 'Sliding Window follows Two Pointers');
+    const slugs = (...ids) => list.topics.filter((t) => ids.includes(t.id)).flatMap((t) => t.problems.map((p) => p.slug));
+    const topicOf = (slug) => list.topics.find((t) => t.problems.some((p) => p.slug === slug)).id;
+    // The case that was reported: Two Pointers finished, so Stack comes before Sliding Window.
+    assert.equal(topicOf(nextOnRoadmap(list, slugs('arrays-hashing', 'two-pointers'))[0].slug), 'stack', list.id);
+    // Within a step the list's own order decides (Two Pointers before Stack).
+    assert.equal(topicOf(nextOnRoadmap(list, slugs('arrays-hashing'))[0].slug), 'two-pointers', list.id);
+    // Once both steps are done, the next step opens (Sliding Window, then Binary Search and Linked List).
+    const next = nextOnRoadmap(list, slugs('arrays-hashing', 'two-pointers', 'stack'), { count: 3 }).map((p) => topicOf(p.slug));
+    assert.equal(next[0], 'sliding-window', list.id);
+  }
+  // A list without prerequisites keeps its own order.
+  assert.deepEqual([...topicDepths(BLIND_75).values()].filter((d) => d !== 0), []);
+});
