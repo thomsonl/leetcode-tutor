@@ -3814,6 +3814,8 @@
     if (res.status === 200 && body && body.ok) return { ok: true };
     if (res.status === 503) return { ok: false, message: "The helper app isn't running, so the mode wasn't switched." };
     if (res.status === 504) return { ok: false, message: "The switch is waiting for the tutor's current reply." };
+    // A helper from before modes has no such route.
+    if (res.status === 404) return { ok: false, message: "This helper is too old to switch modes. Update it in Settings (the gear above)." };
     const message = body && body.error && typeof body.error.message === "string" ? body.error.message : "Couldn't switch modes.";
     return { ok: false, message };
   }

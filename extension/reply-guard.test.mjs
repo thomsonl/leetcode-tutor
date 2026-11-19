@@ -117,7 +117,8 @@ test('classifyMessage tells the turn kinds apart', () => {
   assert.equal(classifyMessage('Is this optimal? Show me the code.').kind, 'answer');
   assert.equal(classifyMessage('Give me a hint on the optimal runtime.').kind, 'hint');
   assert.equal(classifyMessage('Can my code use the same element twice?').kind, 'chat');
-  assert.equal(classifyMessage('What is my time complexity?').kind, 'chat');
+  // Reporting their complexity always says whether a better bound exists, so asking for it is an optimal-runtime turn.
+  assert.equal(classifyMessage('What is my time complexity?').kind, 'optimal');
   assert.equal(classifyMessage('anything', { trigger: 'submit' }).kind, 'submit');
 });
 
@@ -334,6 +335,27 @@ test('a Submit bound sentence may name the complexity of their own time and spac
   const backend = fakeBackend([reply]);
   const { shown } = await run(backend, createReplyGuard(), { text: null, trigger: 'submit', code: twoSum });
   assert.equal(shown, reply);
+});
+
+test('asking for the complexity of their code is answered like an optimal-runtime question, a concept question is not', () => {
+  for (const ask of ['What is the time complexity of my code?', "what's the complexity?", 'Tell me the time and space complexity of this solution', 'what is the space complexity']) {
+    assert.equal(classifyMessage(ask).kind, 'optimal', ask);
+  }
+  for (const other of ['What is the time complexity of binary search?', 'Why does the seen set matter?', 'how do I compute complexity of recursion trees in general']) {
+    assert.notEqual(classifyMessage(other).kind, 'optimal', other);
+  }
+  assert.equal(classifyMessage('What is the complexity? show me the code').kind, 'answer', 'a code request still wins');
+});
+
+test('a complexity report may say it is the most optimal complexity, on a chat question and on a Submit', async () => {
+  const reply = 'Your code is O(n) time and O(n) space. This is the most optimal complexity for this problem.';
+  const asked = fakeBackend([reply]);
+  const { shown } = await run(asked, createReplyGuard(), { text: 'What is the time and space complexity of my code?', code: twoSum });
+  assert.equal(shown, reply);
+  assert.ok(asked.sent[0].endsWith(OPTIMAL_NOTE), 'the note that asks for the verdict is beside the question');
+  const submit = fakeBackend([`The code does what it says. Time O(n) and space O(n). ${reply.split('. ').pop()}`]);
+  const review = await run(submit, createReplyGuard(), { text: null, trigger: 'submit', code: twoSum });
+  assert.match(review.shown, /This is the most optimal complexity for this problem\.$/);
 });
 
 test('only an optimal-runtime question gets the note beside it', async () => {

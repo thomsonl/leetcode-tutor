@@ -103,9 +103,13 @@ test("the optimal-runtime answer says whether, never what, and a Submit asks for
   for (const prompt of [TUTOR_SYSTEM_PROMPT, INTERVIEWER_SYSTEM_PROMPT]) {
     const rule = prompt.match(/whether their time and space are the best achievable for this problem[^]*?counts as a hint they asked for\.|whether their time and space are the best achievable for this problem[^]*?what their code repeats\./);
     assert.ok(rule, "no optimal-runtime rule");
-    assert.match(rule[0], /If they are, say so/);
+    assert.match(rule[0], /If they are, say that this is the most optimal complexity for this problem/);
     assert.match(rule[0], /never the bound/);
+    // Every report of their complexity also says whether a better bound exists.
+    assert.match(prompt, /Whenever you report the time and space complexity of their code \(always on a Submit, and whenever they ask about it\), say in that same reply whether a better bound exists/);
   }
+  assert.match(SUBMIT_ADDENDUM, /best achievable for this problem, so this is the most optimal complexity/);
+  assert.match(SUBMIT_ADDENDUM, /time O\(\.\.\.\) and space O\(\.\.\.\)/);
   assert.match(SUBMIT_ADDENDUM, /best achievable for this problem/);
   assert.match(SUBMIT_ADDENDUM, /or that a better bound exists \(never the bound or method\)/);
   assert.match(SUBMIT_ADDENDUM, /Do not suggest a different approach/);
