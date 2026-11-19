@@ -12,6 +12,7 @@
         "Made removing the extension open a page with the one command that removes the helper, and made the helper uninstall clear its cached copy too.",
         "Added this Changelog tab, a badge on the toolbar icon and a card in the Tutor tab that appear after an update.",
         "Tidied the Settings page: one Model section, then Prompts, Helper and a collapsed Advanced section.",
+        "Gave Progress, Settings and Changelog the same page width, so the header and tabs no longer jump between them, and set Settings out in two columns on a wide page.",
         "Fixed the suggested next topic on the NeetCode lists going deeper before wider: Stack now comes before Sliding Window, since it follows Arrays & Hashing directly.",
         "Made the tutor always say whether a better time or space complexity exists whenever it reports yours, and say \"this is the most optimal complexity for this problem\" when yours is already the best.",
         "Made the helper keep itself up to date (version 0.1.6 and later): the first time a browser session uses it, it checks npm and installs a newer version before use (the Tutor tab says \"Updating the helper\"), and otherwise it checks once a day and installs when nothing is using it. Settings shows its version, an Update now button and a switch to turn this off.",

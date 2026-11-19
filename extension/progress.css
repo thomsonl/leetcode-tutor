@@ -59,9 +59,6 @@
 .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--text); }
 .tab:focus-visible { outline-offset: -2px; border-radius: 4px 4px 0 0; }
 
-/* The Progress tab takes a wider page for the graph; Settings keeps its
-   reading width. */
-body[data-tab="progress"] main { max-width: 1120px; }
 body[data-tab="progress"] #connection, body[data-tab="changelog"] #connection { display: none; }
 [role="tabpanel"][hidden] { display: none; }
 
@@ -196,7 +193,7 @@ body[data-tab="progress"] #connection, body[data-tab="changelog"] #connection { 
 
 /* While the panel is open the page does not scroll; progress.js pads the
    body by the scrollbar's width then, so nothing behind it moves. */
-html.drawer-open { overflow: hidden; }
+html.drawer-open { overflow: hidden; scrollbar-gutter: auto; }
 .backdrop { position: fixed; inset: 0; z-index: 10; background: var(--backdrop); }
 .backdrop[hidden], .drawer[hidden] { display: none; }
 .drawer {

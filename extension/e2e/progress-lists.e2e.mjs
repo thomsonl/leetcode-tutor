@@ -447,10 +447,10 @@ try {
       const d = await page.eval(`(() => {
         const drawer = document.getElementById('drawer');
         const cells = [...drawer.querySelectorAll('td, th')].filter((c) => c.scrollWidth > c.clientWidth + 1).map((c) => c.textContent);
-        return { width: drawer.getBoundingClientRect().width, sideways: drawer.scrollWidth > drawer.clientWidth, cells };
+        return { view: document.documentElement.clientWidth, width: drawer.getBoundingClientRect().width, sideways: drawer.scrollWidth > drawer.clientWidth, cells };
       })()`);
       check(!d.sideways && d.cells.length === 0, `panel at ${width}: ${JSON.stringify(d)}`);
-      if (width <= 560) check(d.width === width, `full width panel: ${d.width}`);
+      if (width <= 560) check(d.width === d.view, `full width panel: ${d.width}`);
       await page.screenshot(path.join(shots, `groups-drawer-${width}-dark.png`), { width, height: 900, scheme: 'dark' });
       await key(page, 'Escape');
     });

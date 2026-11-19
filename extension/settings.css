@@ -49,7 +49,9 @@ body {
   font: 400 14px/21px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
-main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+/* One page width for every tab, so the header and tabs never jump when you
+   switch (the Progress graph needs this much; Settings uses it as two columns). */
+main { max-width: 1120px; margin: 0 auto; padding: 32px 16px 64px; }
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
@@ -238,3 +240,21 @@ form[data-disabled] .card:not(#helper-card):not(#model-card), form[data-disabled
   .add-profile[data-open="true"] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .add-actions { grid-column: span 2; }
 }
+
+/* Settings: the model and its options on the left, what the tutor is told and
+   the helper on the right. One column on a narrow page. */
+@media (min-width: 900px) {
+  #panel-settings:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 24px; align-items: start; }
+  #panel-settings > #offline { grid-column: 1 / -1; grid-row: 1; }
+  #panel-settings > form { grid-column: 1; grid-row: 2 / span 2; min-width: 0; }
+  #panel-settings > #prompts-card { grid-column: 2; grid-row: 2; }
+  #panel-settings > #helper-card { grid-column: 2; grid-row: 3; }
+  #panel-settings > #foot { grid-column: 1 / -1; grid-row: 4; }
+  #panel-settings > #version-line { grid-column: 1 / -1; grid-row: 5; }
+  /* Half a page is too narrow for four fields in a row. */
+  #panel-settings .add-profile[data-open="true"] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  #panel-settings .add-actions { grid-column: span 2; }
+}
+
+/* The page keeps the same width whether or not a tab is tall enough to scroll. */
+html { scrollbar-gutter: stable; }

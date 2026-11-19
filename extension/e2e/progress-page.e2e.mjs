@@ -374,10 +374,10 @@ try {
         const drawer = document.getElementById('drawer');
         const table = drawer.querySelector('table');
         const cells = [...drawer.querySelectorAll('td, th')].filter((c) => c.scrollWidth > c.clientWidth + 1).map((c) => c.textContent);
-        return { drawer: drawer.getBoundingClientRect().width, table: table.getBoundingClientRect().right <= drawer.getBoundingClientRect().right, sideways: drawer.scrollWidth > drawer.clientWidth, cells, page: document.scrollingElement.scrollWidth - window.innerWidth };
+        return { view: document.documentElement.clientWidth, drawer: drawer.getBoundingClientRect().width, table: table.getBoundingClientRect().right <= drawer.getBoundingClientRect().right, sideways: drawer.scrollWidth > drawer.clientWidth, cells, page: document.scrollingElement.scrollWidth - window.innerWidth };
       })()`);
       check(d.table && !d.sideways && d.cells.length === 0 && d.page <= 0, `panel at ${width}: ${JSON.stringify(d)}`);
-      if (width <= 560) check(d.drawer === width, `full width panel: ${d.drawer}`);
+      if (width <= 560) check(d.drawer === d.view, `full width panel: ${d.drawer}`);
       await page.screenshot(path.join(shots, `drawer-${width}-dark.png`), { width, height: 900, scheme: 'dark' });
       await page.screenshot(path.join(shots, `drawer-${width}-light.png`), { width, height: 900, scheme: 'light' });
       await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
