@@ -497,3 +497,45 @@ test('a reload with no resume record reopens the options page only when one is o
   assert.equal(closed.reloads, 1);
   assert.equal(SETTINGS_RESUME_KEY in closed.store, false);
 });
+
+// ---- updating the helper ----
+
+const STATUS = { type: 'status', version: '0.1.6', relay: { state: 'running' }, companion: { state: 'running' }, error: null, update: { current: '0.1.6', latest: '0.1.7', newer: true, auto: true, state: 'idle', error: null } };
+
+test('update: a check, an install and the automatic choice are asked of the helper, and its answers are kept', (t) => {
+  const { launcher, last, types } = setup(t);
+  launcher.setWanted(true);
+  launcher.tabOpened(1, URL_A);
+  last().onMessage.fire(STATUS);
+  assert.equal(launcher.view().host.update.latest, '0.1.7');
+
+  assert.equal(launcher.checkUpdate(), true);
+  last().onMessage.fire({ type: 'update-check', update: { ...STATUS.update, latest: '0.1.8' } });
+  assert.equal(launcher.view().host.update.latest, '0.1.8', 'the answer to a check replaces what was known');
+  assert.equal(launcher.view().host.version, '0.1.6', 'the rest of the status stays');
+
+  assert.equal(launcher.setAutoUpdate(false), true);
+  const auto = last().sent.filter((m) => m.type === 'set-auto-update').pop();
+  assert.equal(auto.enabled, false);
+
+  assert.equal(launcher.updateNow(), true);
+  assert.equal(launcher.view().updating, true);
+  assert.equal(launcher.updateNow(), false, 'one at a time');
+  assert.ok(types(last()).includes('update'));
+  last().onMessage.fire({ type: 'update', ok: true, version: '0.1.8' });
+  assert.equal(launcher.view().updating, false);
+  assert.deepEqual(launcher.view().updateResult, { ok: true, error: null, version: '0.1.8' });
+});
+
+test('update: a failure is kept for the page to show, and there is no helper to ask without a connection', (t) => {
+  const { launcher, last } = setup(t);
+  assert.equal(launcher.updateNow(), false, 'not connected');
+  assert.equal(launcher.checkUpdate(), false);
+  launcher.setWanted(true);
+  launcher.tabOpened(1, URL_A);
+  last().onMessage.fire(STATUS);
+  launcher.updateNow();
+  last().onMessage.fire({ type: 'update', ok: false, error: 'npm exited with 1' });
+  assert.deepEqual(launcher.view().updateResult, { ok: false, error: 'npm exited with 1', version: null });
+  assert.equal(launcher.view().updating, false);
+});

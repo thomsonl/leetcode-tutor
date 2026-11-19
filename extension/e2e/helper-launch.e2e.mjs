@@ -267,6 +267,26 @@ try {
     await options.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the save', timeout: 15000 });
   });
 
+  await scenario('the Helper section shows the helper\'s version and the automatic update switch, which the helper remembers', async () => {
+    const where = layout({ platform: 'linux', home, env: {} });
+    const configFile = path.join(where.appDir, 'helper-config.json');
+    await options.waitFor(`document.getElementById('helper-version-line')`, { what: 'the version line', timeout: 15000 });
+    const line = await options.eval(`document.getElementById('helper-version-line').textContent`);
+    check(/^Version \d+\.\d+\.\d+\./.test(line), `version line: ${line}`);
+    check(!(await options.eval(`document.querySelector('#helper-body').textContent.includes('older than')`)), 'this helper is not called too old');
+    check(await options.eval(`document.getElementById('helper-auto-update').checked`), 'automatic update is on by default');
+    check(JSON.parse(fs.readFileSync(configFile, 'utf8')).autoUpdate === true, 'the installer wrote the default');
+    await options.eval(`document.getElementById('helper-auto-update').click()`);
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline && JSON.parse(fs.readFileSync(configFile, 'utf8')).autoUpdate !== false) await sleep(200);
+    check(JSON.parse(fs.readFileSync(configFile, 'utf8')).autoUpdate === false, 'turning it off reached the helper\'s config');
+    check(JSON.parse(fs.readFileSync(configFile, 'utf8')).root, 'the recorded root is kept');
+    await options.waitFor(`!document.getElementById('helper-auto-update').checked`, { what: 'the switch to stay off', timeout: 10000 });
+    await options.screenshot(path.join(shots, 'helper-update-section.png'), { width: 900, height: 1100 });
+    // The student's choice is kept the way it was found for the later scenarios.
+    await options.eval(`document.getElementById('helper-auto-update').click()`);
+  });
+
   await scenario('closing the last problem tab stops everything after the 30 s grace, not before', async () => {
     await page.send('Page.close');
     page = null;

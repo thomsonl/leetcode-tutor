@@ -23,6 +23,7 @@
 import { createTutorService, SETTINGS_KEY } from "./shared/tutor-service.js";
 import { normalizeSettings } from "./shared/extension-settings.js";
 import { createHelperLauncher } from "./shared/helper-launcher.js";
+import { MIN_HELPER_VERSION, helperTooOld } from "./shared/helper-version.js";
 import { createSolvedService } from "./shared/solved.js";
 import { createNativeSetup } from "./shared/native-setup.js";
 import { registerUninstallPage } from "./shared/uninstall-page.js";
@@ -124,6 +125,9 @@ const nativeSetup = createNativeSetup({
   },
 });
 
+// What the options page sends to look for, install or stop installing a newer helper.
+const HELPER_UPDATE_MESSAGES = new Set(["lc-tutor:helper-update-check", "lc-tutor:helper-update", "lc-tutor:helper-auto-update"]);
+
 // The options page asks for the helper's state; panels hear it so an offline
 // panel can point to Settings.
 async function helperView() {
@@ -136,8 +140,12 @@ async function helperView() {
   // `nativeApi`: whether this worker can reach the helper at all; `native`:
   // 'pending' while the reload that fixes a missing API is coming, 'stuck'
   // when it did not help (see shared/native-setup.js).
+  const view = launcher.view();
   return {
-    ...launcher.view(),
+    ...view,
+    // The helper is older than this version of the extension works with.
+    helperOld: helperTooOld(view.host && view.host.version),
+    minHelperVersion: MIN_HELPER_VERSION,
     runtime,
     permission: granted,
     nativeApi: typeof api.runtime.connectNative === "function",
@@ -351,7 +359,7 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   // A Run or Submit makes its tab the active problem.
   if (message && message.type === "lc-tutor:capture" && sender.tab) launcher.markActive(sender.tab.id);
-  if (message && (message.type === "lc-tutor:helper-status" || message.type === "lc-tutor:helper-retry")) {
+  if (message && (message.type === "lc-tutor:helper-status" || message.type === "lc-tutor:helper-retry" || HELPER_UPDATE_MESSAGES.has(message.type))) {
     // Only the extension's own pages (the options page, even open in a tab),
     // never a content script on leetcode.com.
     if (!sender.url || !sender.url.startsWith(api.runtime.getURL(""))) return undefined;
@@ -364,6 +372,9 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await refreshHelper();
         launcher.retry();
       }
+      if (message.type === "lc-tutor:helper-update-check") launcher.checkUpdate();
+      if (message.type === "lc-tutor:helper-update") launcher.updateNow();
+      if (message.type === "lc-tutor:helper-auto-update") launcher.setAutoUpdate(message.enabled === true);
       return helperView();
     })().then(sendResponse, () => sendResponse(null));
     return true;

@@ -66,6 +66,8 @@ export function createHelperLauncher({
   let retryTimer = null;
   let retryDelay = RETRY_MIN_MS;
   let nextId = 1;
+  let updating = false; // an update asked for from the options page is running
+  let updateResult = null; // { ok, error, version } of the last one
 
   function emit() {
     const snapshot = view();
@@ -73,7 +75,7 @@ export function createHelperLauncher({
   }
 
   function view() {
-    return { wanted, state, tabs: tabs.size, host, error };
+    return { wanted, state, tabs: tabs.size, host, error, updating, updateResult };
   }
 
   function post(message) {
@@ -139,6 +141,15 @@ export function createHelperLauncher({
         state = 'running';
         retryDelay = RETRY_MIN_MS;
         emit();
+      } else if (message.type === 'update-check' && message.update && host) {
+        // The answer to an explicit check: what the registry said just now.
+        host = { ...host, update: message.update };
+        emit();
+      } else if (message.type === 'update') {
+        // The host leaves after a good update, so the browser starts the new copy.
+        updating = false;
+        updateResult = { ok: Boolean(message.ok), error: message.error || null, version: message.version || null };
+        emit();
       }
     });
     next.onDisconnect.addListener(() => {
@@ -188,6 +199,31 @@ export function createHelperLauncher({
   }
 
   return {
+    // Asks the helper to look for a newer version now.
+    checkUpdate() {
+      return post({ type: 'update-check' });
+    },
+
+    // Asks the helper to install the newer version it knows of. It stops, and
+    // this reconnects to the new copy by itself.
+    updateNow() {
+      if (updating || !port) return false;
+      updating = true;
+      updateResult = null;
+      emit();
+      if (!post({ type: 'update' })) {
+        updating = false;
+        emit();
+        return false;
+      }
+      return true;
+    },
+
+    // Whether the helper installs a newer version by itself when it stops.
+    setAutoUpdate(enabled) {
+      return post({ type: 'set-auto-update', enabled: Boolean(enabled) });
+    },
+
     // A Tutor panel port opened in this tab.
     tabOpened(tabId, url) {
       const entry = tabs.get(tabId) || { ports: 0, slug: null };

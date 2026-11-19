@@ -48,6 +48,25 @@ In PowerShell, git and npm print some normal progress in red (for example `Nativ
 
    Run it in a terminal, press Check again, and once the Helper says Running, your choice is saved by itself.
 
+## Update
+
+The extension updates itself through your browser's store, and your settings, API keys and progress are kept across updates.
+The helper is a separate npm package, and from version 0.1.6 it keeps itself up to date.
+Once a day it asks the npm registry for the newest version.
+When a newer one exists, it installs it by itself at a moment nothing is using it (the browser closed, or the last LeetCode tab closed), by running the same `npx` command you would run by hand.
+Your saved helper settings are kept.
+
+The Helper section in Settings shows the helper's version and lets you update right away, check again, or turn the automatic update off.
+To update by hand, run this once (it reuses the browsers and extension id already set up):
+
+```sh
+npx leetcode-capture-helper@latest update
+```
+
+To stop automatic updates, untick the option in Settings, or install with `--no-auto-update`, or set `LEETCODE_CAPTURE_NO_AUTO_UPDATE=1`.
+A helper older than 0.1.6 cannot update itself: run the install command from Settings again once, and it will from then on.
+The extension tells you in Settings when its helper is too old for it.
+
 ## Uninstall
 
 Remove the extension from `chrome://extensions` (or your browser's own extensions page).

@@ -3,7 +3,7 @@
 //
 // What install writes, all of it listed in a receipt so uninstall removes
 // exactly that and nothing else:
-//   - a private copy of the host (host.js, framing.js, config.js) in the data
+//   - a private copy of the host (host.js, framing.js, config.js, update.js) in the data
 //     folder, so clearing the npx cache does not break the browser's launch,
 //     plus helper-config.json recording where the companion and relay live;
 //   - a wrapper script that runs that copy with the node that ran install;
@@ -23,7 +23,7 @@ import { CHROME_EXTENSION_IDS, CHROME_ID_RE, GECKO_ID, HOST_DESCRIPTION, HOST_NA
 import { checkRoot } from './host.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const APP_FILES = ['host.js', 'framing.js', 'config.js'];
+const APP_FILES = ['host.js', 'framing.js', 'config.js', 'update.js'];
 const RECEIPT = 'install-receipt.json';
 
 // Each browser: where its per-user registrations live. `profile` is the
@@ -163,6 +163,7 @@ export function install({
   browsers = null,
   reg = defaultReg,
   sourceDir = HERE,
+  autoUpdate = true,
 }) {
   const where = layout({ platform, home, env });
   const rootError = checkRoot(root);
@@ -189,7 +190,7 @@ export function install({
   try {
     for (const name of APP_FILES) writeFile(path.join(where.appDir, name), fs.readFileSync(path.join(sourceDir, name)));
     writeFile(path.join(where.appDir, 'package.json'), `${JSON.stringify({ type: 'module', private: true }, null, 2)}\n`);
-    writeFile(path.join(where.appDir, 'helper-config.json'), `${JSON.stringify({ root: path.resolve(root) }, null, 2)}\n`);
+    writeFile(path.join(where.appDir, 'helper-config.json'), `${JSON.stringify({ root: path.resolve(root), autoUpdate: Boolean(autoUpdate) }, null, 2)}\n`);
     writeFile(where.wrapper, wrapperText(platform, nodePath, path.join(where.appDir, 'host.js')), platform === 'win32' ? undefined : 0o755);
 
     const registered = [];
@@ -321,6 +322,31 @@ export function uninstall({ platform = process.platform, home, env = process.env
   if (!keepSettings && !env.LEETCODE_CAPTURE_SETTINGS) removeOwnedFolder(where.settingsDir, removed, leftover);
   removeNpxCopy(appDir, removed);
   return { removed, leftover, nothing: false };
+}
+
+// What is registered now, as install needs it again for an update: the
+// browsers that point at this helper and the Chrome-family extension ids they
+// allow.
+export function existingRegistration(options) {
+  const s = status(options);
+  const ids = [];
+  for (const b of s.browsers) {
+    for (const origin of b.allowed) {
+      const m = /^chrome-extension:\/\/([a-p]{32})\/$/.exec(origin);
+      if (m) ids.push(m[1]);
+    }
+  }
+  return { installed: s.installed, version: s.version, browsers: s.browsers.filter((b) => b.registered).map((b) => b.id), chromeIds: [...new Set(ids)] };
+}
+
+// helper-config.json's autoUpdate as install last wrote it (true when unknown).
+export function readAutoUpdateChoice({ platform = process.platform, home, env = process.env }) {
+  const where = layout({ platform, home, env });
+  try {
+    return JSON.parse(fs.readFileSync(path.join(where.appDir, 'helper-config.json'), 'utf8')).autoUpdate !== false;
+  } catch {
+    return true;
+  }
 }
 
 export function status({ platform = process.platform, home, env = process.env, reg = defaultReg }) {

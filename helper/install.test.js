@@ -204,6 +204,7 @@ test('cli: parses flags and runs against the layer it is given', (t) => {
     browsers: ['chrome'],
     root: null,
     keepSettings: false,
+    autoUpdate: null,
   });
   assert.throws(() => parseArgs(['install', '--chrome-id']), /needs a value/);
   const home = tempHome(t);

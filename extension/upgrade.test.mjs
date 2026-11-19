@@ -102,3 +102,14 @@ test('a record with something invalid in it keeps the rest instead of resetting'
   assert.equal(s.options.localMaxHistoryTurns, 3);
   assert.equal(s.provider, 'local');
 });
+
+test('a helper older than this extension works with is called old, one that says nothing readable is not', async () => {
+  const { MIN_HELPER_VERSION, helperTooOld } = await import('./shared/helper-version.js');
+  assert.equal(helperTooOld('0.1.5', '0.1.6'), true);
+  assert.equal(helperTooOld('0.1.6', '0.1.6'), false);
+  assert.equal(helperTooOld('0.1.10', '0.1.6'), false, 'compared by number');
+  assert.equal(helperTooOld('0.2.0', '0.1.6'), false);
+  for (const unknown of [undefined, null, '', 'dev', '0.1']) assert.equal(helperTooOld(unknown, '0.1.6'), false, String(unknown));
+  assert.equal(helperTooOld('0.0.1'), true, 'the shipped minimum is what is used by default');
+  assert.equal(helperTooOld(MIN_HELPER_VERSION), false);
+});

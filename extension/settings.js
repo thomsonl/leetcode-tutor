@@ -425,6 +425,52 @@
     return h("div", { class: "helper-step" }, h("div", { class: "helper-command" }, h("code", { text: command }), copy), status);
   }
 
+  // One of the update requests (check now, install, the automatic choice),
+  // answered with the helper's state, which is drawn again.
+  async function helperUpdateCall(type, extra = {}) {
+    try {
+      helperInfo = await api.runtime.sendMessage({ type, want: true, ...extra });
+    } catch {
+      // what is shown stays
+    }
+    drawHelper();
+  }
+
+  // The helper's version, and what to do about a newer one. The helper keeps
+  // itself up to date when it is not in use (helper/update.js); this is where a
+  // student sees that, updates right away, or turns it off.
+  function updateBlock() {
+    const host = helperInfo && helperInfo.host;
+    if (!host || !host.version) return null;
+    const box = h("div", { class: "helper-update" });
+    if (helperInfo.helperOld) {
+      box.append(
+        h("p", { class: "hint", text: `This helper is version ${host.version}. This version of the extension needs ${helperInfo.minHelperVersion} or newer, so some things may not work. Run the install command again to update it (from then on it updates itself):` }),
+        commandRow(installCommand(), "update")
+      );
+      return box;
+    }
+    const update = host.update;
+    if (!update) {
+      box.appendChild(h("p", { class: "hint", text: `Version ${host.version}.` }));
+      return box;
+    }
+    const result = helperInfo.updateResult;
+    let line = `Version ${update.current}. ${update.newer ? `Version ${update.latest} is available.` : "This is the newest version."}`;
+    if (helperInfo.updating) line = `Updating to ${update.latest}. The helper restarts by itself when it is done.`;
+    else if (result && result.ok) line = `Updated to ${result.version || update.latest}. The helper restarts by itself.`;
+    else if (result && !result.ok) line = `Could not update: ${result.error || "it failed"}. Version ${update.current} keeps working.`;
+    const actions = h("div", { class: "actions" });
+    if (update.newer && !helperInfo.updating) {
+      actions.appendChild(h("button", { type: "button", id: "helper-update", class: "btn", text: "Update now", onclick: () => helperUpdateCall("lc-tutor:helper-update") }));
+    }
+    actions.appendChild(h("button", { type: "button", id: "helper-update-check", class: "btn", text: "Check for updates", disabled: Boolean(helperInfo.updating), onclick: () => helperUpdateCall("lc-tutor:helper-update-check") }));
+    const auto = toggle("helper-auto-update", "Update the helper by itself", "A newer version is installed when the helper is not in use (the browser closed, or the last LeetCode tab). It asks npm for the newest version once a day. Your settings are kept.", update.auto);
+    auto.querySelector("input").addEventListener("change", (e) => helperUpdateCall("lc-tutor:helper-auto-update", { enabled: e.target.checked }));
+    box.append(h("p", { class: "hint", id: "helper-version-line", text: line }), actions, auto);
+    return box;
+  }
+
   function drawHelper() {
     const card = $("helper-card");
     if (card.hidden) return;
@@ -505,6 +551,8 @@
                 : "It starts by itself when you open a LeetCode problem.",
           })
         );
+        const updates = updateBlock();
+        if (updates) body.appendChild(updates);
       }
       body.appendChild(
         h(
