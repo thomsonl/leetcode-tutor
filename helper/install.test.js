@@ -240,6 +240,20 @@ test('uninstall also removes what the helper wrote while it ran, and the saved s
   assert.equal(uninstall({ platform: 'linux', home, env: {} }).nothing, true);
 });
 
+test('installing again (how an update is done) keeps the saved settings and what the helper wrote', (t) => {
+  const home = tempHome(t);
+  install({ platform: 'linux', home, env: {}, root: REPO, chromeIds: [ID], browsers: ['chromium'] });
+  const where = layout({ platform: 'linux', home, env: {} });
+  fs.mkdirSync(where.settingsDir, { recursive: true });
+  const settings = '{"providers":{"openai":{"apiKey":"secret"}},"profiles":[{"id":"a"}]}\n';
+  fs.writeFileSync(path.join(where.settingsDir, 'settings.json'), settings);
+  fs.writeFileSync(path.join(where.settingsDir, 'tutor-state.json'), '{}\n');
+  install({ platform: 'linux', home, env: {}, root: REPO, chromeIds: [ID], browsers: ['chromium'] });
+  assert.equal(fs.readFileSync(path.join(where.settingsDir, 'settings.json'), 'utf8'), settings, 'the API key and models are still there');
+  assert.equal(fs.existsSync(path.join(where.settingsDir, 'tutor-state.json')), true);
+  assert.equal(status({ platform: 'linux', home, env: {} }).installed, true);
+});
+
 // A fake npx cache folder: <home>/.npm/_npx/<hash>/node_modules/leetcode-capture-helper
 function fakeNpxCache(home, dependencies, hash = 'abc123') {
   const hashDir = path.join(home, '.npm', '_npx', hash);

@@ -171,9 +171,11 @@ export function install({
   const wanted = browsers ? new Set(browsers) : null;
   for (const id of wanted || []) if (!BROWSER_IDS.includes(id)) throw new Error(`unknown browser "${id}" (one of ${BROWSER_IDS.join(', ')})`);
 
-  // A reinstall starts from a clean slate.
+  // A reinstall (which is also how an update is done) starts from a clean
+  // slate for what install wrote, but keeps the student's saved settings (API
+  // keys, models) and the npx copy this very run is using.
   const previous = readReceipt(where);
-  if (previous) uninstall({ platform, home, env, reg });
+  if (previous) uninstall({ platform, home, env, reg, keepSettings: true, appDir: null });
 
   const receipt = { version: VERSION, platform, files: [], dirs: [], registry: [] };
   const notes = [];
@@ -265,6 +267,7 @@ export function npxCacheFolder(appDir) {
 // Best effort, never reported as a leftover: on Windows the running helper
 // holds files in there open, and npm clears its own cache in time anyway.
 function removeNpxCopy(appDir, removed) {
+  if (!appDir) return;
   const dir = npxCacheFolder(appDir);
   if (!dir) return;
   try {
