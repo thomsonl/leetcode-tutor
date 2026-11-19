@@ -51,6 +51,7 @@ In PowerShell, git and npm print some normal progress in red (for example `Nativ
 ## Update
 
 The extension updates itself through your browser's store, and your settings, API keys and progress are kept across updates.
+Each time the browser starts, the extension also asks the store for an update right away instead of waiting for the browser's own schedule, and reloads itself to take it once no Tutor tab or Settings page is open, so it never cuts off a reply.
 The helper is a separate npm package, and from version 0.1.6 it keeps itself up to date.
 The first time each browser session uses the helper (when you open a LeetCode problem), the extension has it ask the npm registry for the newest version.
 If a newer one exists, it is installed before the helper is used, and the Tutor tab says "Updating the helper" meanwhile.

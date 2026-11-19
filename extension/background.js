@@ -24,6 +24,7 @@ import { createTutorService, SETTINGS_KEY } from "./shared/tutor-service.js";
 import { normalizeSettings } from "./shared/extension-settings.js";
 import { createHelperLauncher } from "./shared/helper-launcher.js";
 import { MIN_HELPER_VERSION, helperTooOld } from "./shared/helper-version.js";
+import { createExtensionUpdater } from "./shared/extension-update.js";
 import { createSolvedService } from "./shared/solved.js";
 import { createNativeSetup } from "./shared/native-setup.js";
 import { registerUninstallPage } from "./shared/uninstall-page.js";
@@ -426,6 +427,8 @@ api.runtime.onConnect.addListener((port) => {
   port.onDisconnect.addListener(() => {
     panelPorts.delete(port);
     launcher.tabClosed(tab.id);
+    // A quiet moment for an update that was waiting for one.
+    extensionUpdater.tryApply();
   });
   panelPorts.add(port);
   launcher.tabOpened(tab.id, tab.url || port.sender.url);
@@ -461,6 +464,30 @@ if (api.permissions.onRemoved) {
 // worker would stay asleep until the next problem tab. The call at start is
 // for a worker woken by something else first (the resume record is used
 // only once either way).
+// Taking the extension's own update as soon as the browser has it: ask the
+// store when the browser starts, and reload to apply it when no Tutor panel or
+// extension page is open (shared/extension-update.js).
+async function extensionInUse() {
+  if (panelPorts.size > 0) return true;
+  try {
+    if (typeof api.runtime.getContexts === "function") {
+      const pages = await api.runtime.getContexts({ contextTypes: ["TAB", "POPUP", "SIDE_PANEL"] });
+      return pages.length > 0;
+    }
+  } catch {
+    return true;
+  }
+  return false;
+}
+const extensionUpdater = createExtensionUpdater({
+  runtime: api.runtime,
+  busy: extensionInUse,
+  timers: { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (id) => clearTimeout(id) },
+  log: (text) => console.warn(`[leetcode-capture] ${text}`),
+});
+if (api.runtime.onStartup) api.runtime.onStartup.addListener(() => extensionUpdater.check());
+if (api.runtime.onUpdateAvailable) api.runtime.onUpdateAvailable.addListener((details) => extensionUpdater.onUpdateAvailable(details));
+
 if (api.runtime.onInstalled) {
   api.runtime.onInstalled.addListener((details) => {
     nativeSetup.reopenAfterReload();
