@@ -52,8 +52,11 @@ In PowerShell, git and npm print some normal progress in red (for example `Nativ
 
 The extension updates itself through your browser's store, and your settings, API keys and progress are kept across updates.
 The helper is a separate npm package, and from version 0.1.6 it keeps itself up to date.
-Once a day it asks the npm registry for the newest version.
-When a newer one exists, it installs it by itself at a moment nothing is using it (the browser closed, or the last LeetCode tab closed), by running the same `npx` command you would run by hand.
+The first time each browser session uses the helper (when you open a LeetCode problem), the extension has it ask the npm registry for the newest version.
+If a newer one exists, it is installed before the helper is used, and the Tutor tab says "Updating the helper" meanwhile.
+That takes a moment, and only happens when there is an update.
+Otherwise the helper asks at most once a day, and installs a newer version by itself when nothing is using it (the browser closed, or the last LeetCode tab closed).
+Either way it runs the same `npx` command you would run by hand.
 Your saved helper settings are kept.
 
 The Helper section in Settings shows the helper's version and lets you update right away, check again, or turn the automatic update off.

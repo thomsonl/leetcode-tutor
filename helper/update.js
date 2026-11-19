@@ -236,6 +236,9 @@ export function makeUpdater({ appDir, dir, current, env = process.env, fetchImpl
     const to = info.latest;
     const result = await runUpdate({ version: to, spawn, logFd, env, wait, timers, ...npmOptions });
     if (wait) {
+      // Installed: what this running copy knows as newer is now behind it, so
+      // the shutdown that follows does not start the same update again.
+      if (result.ok) info = { ...info, newer: false };
       state = result.ok ? 'idle' : 'failed';
       lastError = result.ok ? null : result.error || 'the update failed';
       if (!result.ok) recordResult({ dir, ok: false, from: current, to, error: lastError, now });

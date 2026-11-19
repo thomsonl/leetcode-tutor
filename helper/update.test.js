@@ -207,6 +207,9 @@ test('the updater: a manual update installs the version found and reports how it
   assert.deepEqual([done.ok, done.version], [true, '0.1.6']);
   assert.ok(ok.spawns[0].args.includes('--package=leetcode-capture-helper@0.1.6'));
   assert.equal(ok.updater.view().state, 'idle');
+  assert.equal(ok.updater.view().newer, false, 'what was just installed is no longer "newer"');
+  assert.deepEqual(await ok.updater.autoRun(), { ok: false, skipped: true }, 'so the shutdown that follows does not install it again');
+  assert.equal(ok.spawns.length, 1);
   const bad = updaterFor(t, { spawnExit: 1 });
   await bad.updater.check();
   const failed = await bad.updater.run({ wait: true });

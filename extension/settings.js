@@ -465,7 +465,7 @@
       actions.appendChild(h("button", { type: "button", id: "helper-update", class: "btn", text: "Update now", onclick: () => helperUpdateCall("lc-tutor:helper-update") }));
     }
     actions.appendChild(h("button", { type: "button", id: "helper-update-check", class: "btn", text: "Check for updates", disabled: Boolean(helperInfo.updating), onclick: () => helperUpdateCall("lc-tutor:helper-update-check") }));
-    const auto = toggle("helper-auto-update", "Update the helper by itself", "A newer version is installed when the helper is not in use (the browser closed, or the last LeetCode tab). It asks npm for the newest version once a day. Your settings are kept.", update.auto);
+    const auto = toggle("helper-auto-update", "Update the helper by itself", "A newer version is installed the first time a browser session uses the helper, or when it is not in use (the browser closed, or the last LeetCode tab). It asks npm for the newest version then, at most once a day otherwise. Your settings are kept.", update.auto);
     auto.querySelector("input").addEventListener("change", (e) => helperUpdateCall("lc-tutor:helper-auto-update", { enabled: e.target.checked }));
     box.append(h("p", { class: "hint", id: "helper-version-line", text: line }), actions, auto);
     return box;

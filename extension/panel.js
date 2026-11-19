@@ -2230,6 +2230,14 @@
         banner: "Choose the tutor's model in the extension options (the gear above). A local model or an API key needs nothing else installed.",
       };
     }
+    if (helperState === "updating" && (sourceReachable === false || state.companionOnline === false)) {
+      return {
+        label: "Updating the helper",
+        ok: false,
+        light: "neutral",
+        banner: "Updating the helper app to its newest version. It takes a moment, then the tutor starts by itself.",
+      };
+    }
     if (sourceReachable === false) {
       return {
         label: "Offline",

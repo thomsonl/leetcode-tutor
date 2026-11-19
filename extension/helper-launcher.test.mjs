@@ -20,10 +20,11 @@ function fakeEvent() {
   return { addListener: (fn) => listeners.push(fn), fire: (...args) => listeners.forEach((fn) => fn(...args)) };
 }
 
-function setup(t, { error = null } = {}) {
+function setup(t, { error = null, sessionUpdate = null } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const ports = [];
   const launcher = createHelperLauncher({
+    sessionUpdate,
     connectNative: (name) => {
       assert.equal(name, HELPER_HOST_NAME);
       const port = {
@@ -523,8 +524,62 @@ test('update: a check, an install and the automatic choice are asked of the help
   assert.equal(launcher.updateNow(), false, 'one at a time');
   assert.ok(types(last()).includes('update'));
   last().onMessage.fire({ type: 'update', ok: true, version: '0.1.8' });
-  assert.equal(launcher.view().updating, false);
+  assert.equal(launcher.view().updating, true, 'until the new copy reports in, the helper is still updating');
   assert.deepEqual(launcher.view().updateResult, { ok: true, error: null, version: '0.1.8' });
+  last().onMessage.fire({ ...STATUS, version: '0.1.8' });
+  assert.equal(launcher.view().updating, false);
+});
+
+function sessionStore(already = false) {
+  const state = { done: already, marks: 0 };
+  return { state, done: async () => state.done, mark: async () => { state.done = true; state.marks += 1; } };
+}
+test('session check: the first connection of a browser session asks the registry now, and a newer helper is installed before use', async (t) => {
+  const store = sessionStore();
+  const { launcher, last } = setup(t, { sessionUpdate: store });
+  launcher.setWanted(true);
+  launcher.tabOpened(1, URL_A);
+  last().onMessage.fire(STATUS);
+  await settle();
+  assert.equal(store.state.marks, 1, 'this session is marked as checked');
+  assert.ok(last().sent.some((m) => m.type === 'update-check'));
+  assert.equal(last().sent.some((m) => m.type === 'update'), false, 'nothing is installed before the registry has answered');
+  last().onMessage.fire({ type: 'update-check', update: { ...STATUS.update, newer: true, auto: true } });
+  assert.ok(last().sent.some((m) => m.type === 'update'), 'a newer helper is installed');
+  assert.equal(launcher.view().updating, true);
+  // The helper answers and leaves; until the new copy reports in, it is still updating.
+  last().onMessage.fire({ type: 'update', ok: true, version: '0.1.7' });
+  assert.equal(launcher.view().updating, true, 'restarting counts as updating');
+  last().drop();
+  assert.equal(launcher.view().updating, true);
+  t.mock.timers.tick(60000);
+  last().onMessage.fire({ ...STATUS, version: '0.1.7', update: { ...STATUS.update, current: '0.1.7', newer: false } });
+  await settle();
+  assert.equal(launcher.view().updating, false, 'the new copy is up');
+  assert.equal(store.state.marks, 1, 'and the session is not checked again');
+});
+
+test('session check: nothing is installed when it is up to date, when automatic updates are off, or when this session already looked', async (t) => {
+  for (const [name, reply, already] of [
+    ['up to date', { ...STATUS.update, newer: false }, false],
+    ['automatic updates off', { ...STATUS.update, newer: true, auto: false }, false],
+  ]) {
+    t.mock.timers.reset();
+    const { launcher, last } = setup(t, { sessionUpdate: sessionStore(already) });
+    launcher.setWanted(true);
+    launcher.tabOpened(1, URL_A);
+    last().onMessage.fire(STATUS);
+    await settle();
+    last().onMessage.fire({ type: 'update-check', update: reply });
+    assert.equal(last().sent.some((m) => m.type === 'update'), false, name);
+  }
+  t.mock.timers.reset();
+  const { launcher, last } = setup(t, { sessionUpdate: sessionStore(true) });
+  launcher.setWanted(true);
+  launcher.tabOpened(1, URL_A);
+  last().onMessage.fire(STATUS);
+  await settle();
+  assert.equal(last().sent.some((m) => m.type === 'update-check'), false, 'already checked this session: no registry request');
 });
 
 test('update: a failure is kept for the page to show, and there is no helper to ask without a connection', (t) => {

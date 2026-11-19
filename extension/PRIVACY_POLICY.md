@@ -55,7 +55,7 @@ There are no analytics, no telemetry, no tracking, no ads and no third-party ser
 All of the extension's code ships in the package; it loads and runs no remote code.
 
 The optional helper is a separate npm package, not part of the extension.
-Once a day, while it runs, it asks the public npm registry (`registry.npmjs.org`) for the newest version of that package; the request carries no data of yours.
+The first time it runs in each browser session, and otherwise at most once a day while it runs, it asks the public npm registry (`registry.npmjs.org`) for the newest version of that package; the request carries no data of yours.
 Unless you turn it off in Settings, it installs a newer version of the helper from npm at a moment nothing is using it, as the command `npx leetcode-capture-helper@latest update` would.
 Your saved helper settings are kept.
 

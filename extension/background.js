@@ -36,7 +36,34 @@ const NATIVE = { permissions: ["nativeMessaging"] };
 // How long the setup reload waits after telling the panels about it.
 const SETUP_NOTICE_FLUSH_MS = 300;
 
+// Whether this browser session already looked for a newer helper (storage.session
+// lasts until the browser closes; without it, once per worker start).
+let sessionUpdateSeen = false;
+const SESSION_UPDATE_KEY = "helperUpdateChecked";
+const sessionUpdate = {
+  async done() {
+    try {
+      if (api.storage && api.storage.session) {
+        const stored = await api.storage.session.get(SESSION_UPDATE_KEY);
+        return Boolean(stored && stored[SESSION_UPDATE_KEY]);
+      }
+    } catch {
+      // fall back to this worker's own memory
+    }
+    return sessionUpdateSeen;
+  },
+  async mark() {
+    sessionUpdateSeen = true;
+    try {
+      if (api.storage && api.storage.session) await api.storage.session.set({ [SESSION_UPDATE_KEY]: true });
+    } catch {
+      // this worker's own memory still holds it
+    }
+  },
+};
+
 const launcher = createHelperLauncher({
+  sessionUpdate,
   connectNative: (name) => api.runtime.connectNative(name),
   // Firefox puts the reason on the port, Chrome in runtime.lastError.
   lastError: (port) =>
@@ -159,7 +186,7 @@ launcher.onChange((view) => {
   service.refreshProfiles();
   for (const port of panelPorts) {
     try {
-      port.postMessage({ type: "helper", state: view.wanted ? view.state : null });
+      port.postMessage({ type: "helper", state: view.wanted ? (view.updating ? "updating" : view.state) : null });
     } catch {
       // gone
     }
@@ -405,7 +432,7 @@ api.runtime.onConnect.addListener((port) => {
   const view = launcher.view();
   if (view.wanted) {
     try {
-      port.postMessage({ type: "helper", state: view.state });
+      port.postMessage({ type: "helper", state: view.updating ? "updating" : view.state });
     } catch {
       // already gone
     }
