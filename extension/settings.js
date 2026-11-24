@@ -460,14 +460,14 @@
     if (helperInfo.updating) line = `Updating to ${update.latest}...`;
     else if (result && result.ok) line = `Updated to ${result.version || update.latest}.`;
     else if (result && !result.ok) line = `Could not update: ${result.error || "it failed"}.`;
-    const actions = h("div", { class: "actions" });
+    const actions = h("div", { class: "helper-buttons" });
     if (update.newer && !helperInfo.updating) {
       actions.appendChild(h("button", { type: "button", id: "helper-update", class: "btn", text: "Update now", onclick: () => helperUpdateCall("lc-tutor:helper-update") }));
     }
     actions.appendChild(h("button", { type: "button", id: "helper-update-check", class: "btn", text: "Check for updates", disabled: Boolean(helperInfo.updating), onclick: () => helperUpdateCall("lc-tutor:helper-update-check") }));
-    const auto = toggle("helper-auto-update", "Update the helper automatically", "", update.auto);
+    const auto = toggle("helper-auto-update", "Update automatically", "", update.auto);
     auto.querySelector("input").addEventListener("change", (e) => helperUpdateCall("lc-tutor:helper-auto-update", { enabled: e.target.checked }));
-    box.append(h("p", { class: "hint", id: "helper-version-line", text: line }), actions, auto);
+    box.append(h("div", { class: "helper-row" }, h("p", { class: "hint", id: "helper-version-line", text: line }), actions), auto);
     return box;
   }
 
@@ -542,36 +542,29 @@
         body.appendChild(h("p", { class: "hint", text: "Run this in a terminal, then press Check again:" }));
         body.appendChild(commandRow(installCommand(), "install"));
       } else {
-        body.appendChild(
-          h("p", {
-            class: "hint",
-            text:
-              helperInfo.state === "running"
-                ? "Running."
-                : "Starts when you open a problem.",
-          })
-        );
         const updates = updateBlock();
         if (updates) body.appendChild(updates);
+        else if (helperInfo.state !== "running") body.appendChild(h("p", { class: "hint", text: "Starts when you open a problem." }));
       }
-      body.appendChild(
-        h(
-          "div",
-          { class: "actions" },
-          h("button", {
-            type: "button",
-            id: "helper-check",
-            class: "btn",
-            text: helperChecking ? "Checking..." : "Check again",
-            disabled: helperChecking,
-            onclick: checkHelperAgain,
-          }),
-          h("span", { class: "result", id: "helper-check-note", role: "status", "aria-live": "polite", text: helperChecking ? "Looking for the helper..." : helperCheckNote || "" })
-        )
-      );
+      if (!installed || helperInfo.state !== "running") {
+        body.appendChild(
+          h(
+            "div",
+            { class: "helper-row" },
+            h("span", { class: "result", id: "helper-check-note", role: "status", "aria-live": "polite", text: helperChecking ? "Looking for the helper..." : helperCheckNote || "" }),
+            h("div", { class: "helper-buttons" }, h("button", {
+              type: "button",
+              id: "helper-check",
+              class: "btn",
+              text: helperChecking ? "Checking..." : "Check again",
+              disabled: helperChecking,
+              onclick: checkHelperAgain,
+            }))
+          )
+        );
+      }
       if (installed) {
-        body.appendChild(h("p", { class: "hint", text: "Uninstall:" }));
-        body.appendChild(commandRow(`npx ${HELPER_PACKAGE} uninstall`, "uninstall"));
+        body.appendChild(h("details", { class: "helper-uninstall" }, h("summary", { text: "Uninstall" }), commandRow(`npx ${HELPER_PACKAGE} uninstall`, "uninstall")));
       }
     }
     const error = helperErrorText();
@@ -982,13 +975,11 @@
   function renderBehavior() {
     const inBrowser = runtimeOf(selected) === "extension";
     const o = inBrowser ? ext.settings.options : helper ? helper.settings.options : { autoClearContext: true, vaultAutoSummary: false, localMaxHistoryTurns: 6 };
-    const off = !inBrowser && !helper;
     const box = $("behavior");
     box.textContent = "";
     box.appendChild(
       toggle("autoClearContext", "Start fresh on each problem", "", o.autoClearContext, {
         locked: !inBrowser && helperLocked("autoClearContext"),
-        disabled: off,
       })
     );
     box.appendChild(
@@ -997,7 +988,7 @@
         "Save Submit reviews to Obsidian",
         inBrowser ? "Needs the helper app." : "",
         inBrowser ? false : o.vaultAutoSummary,
-        { locked: !inBrowser && helperLocked("vaultAutoSummary"), disabled: inBrowser || off }
+        { locked: !inBrowser && helperLocked("vaultAutoSummary"), disabled: inBrowser }
       )
     );
     const locked = !inBrowser && helperLocked("localMaxHistoryTurns");
@@ -1005,7 +996,7 @@
       "div",
       { class: "toggle number" },
       h("label", { for: "localMaxHistoryTurns", text: "Exchanges a local model remembers (0 = all)" }),
-      h("input", { type: "number", id: "localMaxHistoryTurns", min: "0", max: "100", value: String(o.localMaxHistoryTurns), disabled: locked || off }),
+      h("input", { type: "number", id: "localMaxHistoryTurns", min: "0", max: "100", value: String(o.localMaxHistoryTurns), disabled: locked }),
       null
     );
     const note = locked ? lockNote("localMaxHistoryTurns") : null;
@@ -1848,27 +1839,30 @@
     card.hidden = false;
     const mode = promptMode;
     if (promptDrafts[mode] === undefined) promptDrafts[mode] = savedPrompt(mode);
-    const tabs = h(
-      "div",
-      { class: "prompt-tabs", role: "group", "aria-label": "Prompt to edit" },
-      ...PROMPT_MODES.map(([id, label]) =>
-        h(
-          "button",
-          {
+    // The same tab bar stays on the page across redraws, so the highlight can
+    // slide from one option to the other instead of jumping.
+    let tabs = document.querySelector("#prompts-body .prompt-tabs");
+    if (!tabs) {
+      tabs = h(
+        "div",
+        { class: "prompt-tabs", role: "group", "aria-label": "Prompt to edit" },
+        h("span", { class: "prompt-thumb", "aria-hidden": "true" }),
+        ...PROMPT_MODES.map(([id, label]) =>
+          h("button", {
             type: "button",
             class: "prompt-tab",
-            "aria-pressed": String(id === mode),
+            text: label,
             onclick: () => {
               if (promptMode === id) return;
               promptMode = id;
               renderPrompts();
             },
-          },
-          label,
-          ext.settings.mode === id ? h("span", { class: "tag", text: "In use" }) : null
+          })
         )
-      )
-    );
+      );
+    }
+    tabs.style.setProperty("--i", String(Math.max(0, PROMPT_MODES.findIndex(([id]) => id === mode))));
+    [...tabs.querySelectorAll(".prompt-tab")].forEach((tab, n) => tab.setAttribute("aria-pressed", String(PROMPT_MODES[n][0] === mode)));
     const intro = h("p", {
       class: "prompt-intro",
       text:
@@ -1949,21 +1943,13 @@
     if (!same) await mirrorPromptsToHelper();
   }
 
-  // The "In use" tag follows the mode chosen in the Tutor tab while this page
-  // stays open; the editor itself is left alone.
+  // Keeps the mode chosen in the Tutor tab current while this page stays open
+  // (it is mirrored to the helper); the editor itself is left alone.
   async function refreshPromptTags() {
     if (!ext || $("prompts-card").hidden) return;
     const res = await worker("lc-tutor:settings-get");
     if (!res.ok || !res.result.settings || res.result.settings.mode === ext.settings.mode) return;
     ext.settings.mode = res.result.settings.mode;
-    const tabs = document.querySelectorAll(".prompt-tab");
-    PROMPT_MODES.forEach(([id], i) => {
-      const tab = tabs[i];
-      if (!tab) return;
-      const tag = tab.querySelector(".tag");
-      if (id === ext.settings.mode && !tag) tab.appendChild(h("span", { class: "tag", text: "In use" }));
-      if (id !== ext.settings.mode && tag) tag.remove();
-    });
   }
 
   // ---- loading ------------------------------------------------------------------------

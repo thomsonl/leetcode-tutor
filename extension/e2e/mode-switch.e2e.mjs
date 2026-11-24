@@ -220,7 +220,7 @@ try {
     reset: !document.getElementById('prompt-reset').disabled,
     result: document.getElementById('prompt-result').textContent,
     resultKind: document.getElementById('prompt-result').getAttribute('data-kind') || '',
-    tabs: [...document.querySelectorAll('.prompt-tab')].map((t) => t.firstChild.textContent + (t.getAttribute('aria-pressed') === 'true' ? '*' : '') + (t.querySelector('.tag') ? ' (in use)' : '')).join(' | '),
+    tabs: [...document.querySelectorAll('.prompt-tab')].map((t) => t.firstChild.textContent + (t.getAttribute('aria-pressed') === 'true' ? '*' : '')).join(' | '),
   }))()`);
   const setPrompt = (text) => settings.eval(`(() => { const a = document.getElementById('prompt-text'); a.value = ${JSON.stringify(text)}; a.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const stored = () => browser.serviceWorkerEval(`chrome.storage.local.get('tutorSettings').then((s) => ({ mode: s.tutorSettings.mode, prompts: s.tutorSettings.prompts }))`);
@@ -230,7 +230,7 @@ try {
     const ui = await promptUi();
     check(ui.text === DEFAULT_PROMPTS.tutor, 'the editor holds the default tutor prompt');
     check(ui.state === 'Default prompt' && !ui.save && !ui.reset, JSON.stringify(ui));
-    check(ui.tabs === 'Tutor* (in use) | Interviewer', ui.tabs);
+    check(ui.tabs === 'Tutor* | Interviewer', ui.tabs);
     const fixed = await settings.eval(`document.querySelector('.prompt-fixed pre').textContent`);
     check(fixed === FIXED_RULES, 'the fixed rules are shown read-only');
     await settings.eval(`document.getElementById('prompts-card').scrollIntoView({ block: 'start' })`);
@@ -274,19 +274,18 @@ try {
     check(systemOf(model.requests.at(-1)).includes(systemMessageFor('tutor')), 'the default tutor prompt is back');
   });
 
-  await scenario('the Interviewer prompt is edited on its own tab, and the in-use tag follows the Tutor tab', async () => {
+  await scenario('the Interviewer prompt is edited on its own tab, and changing the mode in the Tutor tab leaves the editor alone', async () => {
     await settings.send('Page.bringToFront');
     await settings.eval(`document.querySelectorAll('.prompt-tab')[1].click()`);
     let ui = await promptUi();
-    check(ui.text === DEFAULT_PROMPTS.interviewer && ui.tabs === 'Tutor (in use) | Interviewer*', JSON.stringify({ ...ui, text: ui.text.slice(0, 40) }));
+    check(ui.text === DEFAULT_PROMPTS.interviewer && ui.tabs === 'Tutor | Interviewer*', JSON.stringify({ ...ui, text: ui.text.slice(0, 40) }));
     await page.send('Page.bringToFront');
     await page.eval(`window.__qa('.mode-opt')[1].click()`);
     await page.waitFor(`window.__mode() === 'Tutor Interviewer*'`, { what: 'Interviewer chosen' });
     await settings.send('Page.bringToFront');
-    await settings.waitFor(`document.querySelectorAll('.prompt-tab')[1].querySelector('.tag')`, { what: 'the in-use tag to move' });
     ui = await promptUi();
-    check(ui.tabs === 'Tutor | Interviewer* (in use)', ui.tabs);
-    // Unsaved typing survives the tag moving, and switching tabs keeps each draft.
+    check(ui.tabs === 'Tutor | Interviewer*', ui.tabs);
+    // Unsaved typing survives, and switching tabs keeps each draft.
     await setPrompt('You are a strict interviewer. Say only: next question, please.');
     await settings.eval(`document.querySelectorAll('.prompt-tab')[0].click()`);
     check((await promptUi()).text === DEFAULT_PROMPTS.tutor, 'the tutor tab shows its own prompt');

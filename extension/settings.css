@@ -173,11 +173,12 @@ details.card > summary:focus-visible { outline-offset: 6px; border-radius: 6px; 
 
 /* The Prompts card: two toggle tabs choose which prompt the editor shows,
    the chosen one filled, like the Tutor panel's own mode switch. */
-.prompt-tabs { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line-strong); border-radius: 8px; }
-.prompt-tab { height: 28px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: 500 14px/20px inherit; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.prompt-tabs { position: relative; display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 2px; border: 1px solid var(--line-strong); border-radius: 8px; }
+.prompt-thumb { position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 6px) / 2); border-radius: 6px; background: var(--fill); transform: translateX(calc(var(--i, 0) * (100% + 2px))); transition: transform 0.2s ease; }
+.prompt-tab { position: relative; z-index: 1; height: 28px; padding: 0 14px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: 500 14px/20px inherit; font-family: inherit; cursor: pointer; transition: color 0.2s ease; }
 .prompt-tab:hover:not([aria-pressed="true"]) { color: var(--text); }
-.prompt-tab[aria-pressed="true"] { background: var(--fill); color: var(--text); cursor: default; }
-.prompt-tab .tag { margin-left: 0; background: var(--line); }
+.prompt-tab[aria-pressed="true"] { color: var(--text); cursor: default; }
+@media (prefers-reduced-motion: reduce) { .prompt-thumb, .prompt-tab { transition: none; } }
 .prompt-intro { margin: 12px 0 8px; color: var(--muted); }
 .prompt-text {
   display: block; width: 100%; min-height: 320px; padding: 10px 12px; resize: vertical;
@@ -194,7 +195,7 @@ details.card > summary:focus-visible { outline-offset: 6px; border-radius: 6px; 
 /* While a helper provider waits for the helper, what needs it is dimmed.
    The provider list stays usable (another provider may need no helper), the
    Helper card is how the helper gets set up, and the wait note says why. */
-form[data-disabled] .card:not(#helper-card):not(#model-card), form[data-disabled] #model-card .actions, form[data-disabled] #save-result { opacity: 0.55; pointer-events: none; }
+form[data-disabled] .card:not(#helper-card):not(#model-card):not(#advanced-card), form[data-disabled] #model-card .actions, form[data-disabled] #save-result { opacity: 0.55; pointer-events: none; }
 .savebar .wait-note { flex: none; color: var(--text); }
 .notice .aside { display: block; margin-top: 6px; color: var(--muted); font-size: 13px; }
 
@@ -203,7 +204,22 @@ form[data-disabled] .card:not(#helper-card):not(#model-card), form[data-disabled
 }
 
 .helper-head { display: flex; align-items: center; gap: 12px; }
-.helper-head h2 { margin-bottom: 4px; }
+.helper-head { justify-content: space-between; margin-bottom: 12px; }
+.helper-head h2 { margin: 0; }
+#helper-body { display: grid; gap: 12px; }
+#helper-body > * { margin: 0; }
+.helper-update { display: grid; gap: 12px; }
+.helper-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.helper-row .hint, .helper-row .result { flex: 1; min-width: 0; }
+.helper-buttons { flex: none; display: flex; gap: 8px; }
+#helper-card .toggle { padding: 0; border: 0; align-items: center; }
+#helper-card .toggle input { margin: 0; grid-row: auto; }
+#helper-card .helper-step { margin: 0; gap: 0; }
+#helper-card .helper-step .result:empty { display: none; }
+#helper-card .helper-command code { scrollbar-width: none; }
+.helper-uninstall { color: var(--muted); font-size: 13px; line-height: 18px; }
+.helper-uninstall summary { cursor: pointer; width: max-content; }
+.helper-uninstall .helper-step { margin-top: 8px; }
 .helper-head .connection[data-state="bad"] .dot { background: var(--red); }
 .helper-step { display: grid; gap: 8px; margin: 0 0 12px; }
 .helper-step:last-child { margin-bottom: 0; }
