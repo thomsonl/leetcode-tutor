@@ -30,7 +30,6 @@
       <form id="form" novalidate>
         <section class="card" id="model-card" aria-labelledby="model-heading">
           <h2 id="model-heading">Model</h2>
-          <p class="help">The models the Tutor tab can use. The selected one answers now, and the Tutor tab's menu lists them all. A local model or an API key runs in the browser; the Claude and ChatGPT subscriptions need the helper app.</p>
           <div id="profiles" class="profiles" role="radiogroup" aria-label="Default model"></div>
           <div class="add-profile" id="add-profile"></div>
           <p id="profiles-note" class="hint" role="status" aria-live="polite"></p>
@@ -49,14 +48,13 @@
         </details>
 
         <div class="savebar">
-          <p id="wait-note" class="result wait-note" hidden>Waiting for the helper app. Changes save once it runs.</p>
+          <p id="wait-note" class="result wait-note" hidden>Waiting for the helper app.</p>
           <p id="save-result" class="result" role="status" aria-live="polite"></p>
         </div>
       </form>
 
       <section class="card" id="prompts-card" aria-labelledby="prompts-heading" hidden>
         <h2 id="prompts-heading">Prompts</h2>
-        <p class="help">The instructions the tutor follows. Saving starts a new conversation. Switch between Tutor and Interviewer in the Tutor tab's header.</p>
         <div id="prompts-body"></div>
       </section>
 
@@ -65,7 +63,6 @@
           <h2 id="helper-heading">Helper</h2>
           <p id="helper-state" class="connection" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="helper-state-text">Checking</span></p>
         </div>
-        <p class="help">The Claude and ChatGPT subscriptions run through a small helper app that needs Node. The extension starts it when you open a LeetCode problem and stops it 30 seconds after you close the last one.</p>
         <div id="helper-body"></div>
         <p id="helper-error" class="result" data-kind="error" role="alert" hidden></p>
       </section>

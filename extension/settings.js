@@ -445,7 +445,7 @@
     const box = h("div", { class: "helper-update" });
     if (helperInfo.helperOld) {
       box.append(
-        h("p", { class: "hint", text: `This helper is version ${host.version}. This version of the extension needs ${helperInfo.minHelperVersion} or newer, so some things may not work. Run the install command again to update it (from then on it updates itself):` }),
+        h("p", { class: "hint", text: `Helper ${host.version} is too old (needs ${helperInfo.minHelperVersion}). Run this to update it:` }),
         commandRow(installCommand(), "update")
       );
       return box;
@@ -456,16 +456,16 @@
       return box;
     }
     const result = helperInfo.updateResult;
-    let line = `Version ${update.current}. ${update.newer ? `Version ${update.latest} is available.` : "This is the newest version."}`;
-    if (helperInfo.updating) line = `Updating to ${update.latest}. The helper restarts by itself when it is done.`;
-    else if (result && result.ok) line = `Updated to ${result.version || update.latest}. The helper restarts by itself.`;
-    else if (result && !result.ok) line = `Could not update: ${result.error || "it failed"}. Version ${update.current} keeps working.`;
+    let line = update.newer ? `Version ${update.current}. ${update.latest} is available.` : `Version ${update.current}, up to date.`;
+    if (helperInfo.updating) line = `Updating to ${update.latest}...`;
+    else if (result && result.ok) line = `Updated to ${result.version || update.latest}.`;
+    else if (result && !result.ok) line = `Could not update: ${result.error || "it failed"}.`;
     const actions = h("div", { class: "actions" });
     if (update.newer && !helperInfo.updating) {
       actions.appendChild(h("button", { type: "button", id: "helper-update", class: "btn", text: "Update now", onclick: () => helperUpdateCall("lc-tutor:helper-update") }));
     }
     actions.appendChild(h("button", { type: "button", id: "helper-update-check", class: "btn", text: "Check for updates", disabled: Boolean(helperInfo.updating), onclick: () => helperUpdateCall("lc-tutor:helper-update-check") }));
-    const auto = toggle("helper-auto-update", "Update the helper by itself", "A newer version is installed the first time a browser session uses the helper, or when it is not in use (the browser closed, or the last LeetCode tab). It asks npm for the newest version then, at most once a day otherwise. Your settings are kept.", update.auto);
+    const auto = toggle("helper-auto-update", "Update the helper automatically", "", update.auto);
     auto.querySelector("input").addEventListener("change", (e) => helperUpdateCall("lc-tutor:helper-auto-update", { enabled: e.target.checked }));
     box.append(h("p", { class: "hint", id: "helper-version-line", text: line }), actions, auto);
     return box;
@@ -489,14 +489,14 @@
       body.appendChild(
         h("p", {
           class: "hint",
-          text: "Finishing setup: the extension restarts once so the browser lets it start the helper. This page closes and opens again by itself, with your choices kept.",
+          text: "Finishing setup. This page reopens by itself.",
         })
       );
     } else if (setup === "stuck") {
       body.appendChild(
         h("p", {
           class: "hint",
-          text: "The browser has not turned on the connection to the helper yet. Close every browser window, open the browser again, then come back to these settings.",
+          text: "Restart the browser, then come back here.",
         })
       );
     } else if (helperInfo && !helperInfo.permission) {
@@ -504,7 +504,7 @@
         h(
           "div",
           { class: "helper-step" },
-          h("p", { class: "hint", text: "First, let the extension start the helper app. The browser asks once." }),
+          h("p", { class: "hint", text: "Needs Node. Let the extension start the helper." }),
           h(
             "div",
             { class: "actions" },
@@ -512,7 +512,7 @@
               type: "button",
               id: "helper-permission",
               class: "btn primary",
-              text: "Allow starting the helper",
+              text: "Allow",
               onclick: () => {
                 helperError = null;
                 // Straight from the click, before any await.
@@ -539,7 +539,7 @@
     } else if (helperInfo) {
       const installed = helperInfo.state === "running" || helperProbe === "installed";
       if (!installed) {
-        body.appendChild(h("p", { class: "hint", text: "Install the helper once by running this in a terminal, then press Check again:" }));
+        body.appendChild(h("p", { class: "hint", text: "Run this in a terminal, then press Check again:" }));
         body.appendChild(commandRow(installCommand(), "install"));
       } else {
         body.appendChild(
@@ -547,8 +547,8 @@
             class: "hint",
             text:
               helperInfo.state === "running"
-                ? "The tutor is running. It keeps running while this page or a LeetCode problem tab is open, and stops 30 seconds after you close the last one."
-                : "It starts by itself when you open a LeetCode problem.",
+                ? "Running."
+                : "Starts when you open a problem.",
           })
         );
         const updates = updateBlock();
@@ -570,7 +570,7 @@
         )
       );
       if (installed) {
-        body.appendChild(h("p", { class: "hint", text: "To remove it, run:" }));
+        body.appendChild(h("p", { class: "hint", text: "Uninstall:" }));
         body.appendChild(commandRow(`npx ${HELPER_PACKAGE} uninstall`, "uninstall"));
       }
     }
@@ -611,8 +611,8 @@
       if (left > 0) await new Promise((resolve) => setTimeout(resolve, left));
       helperChecking = false;
       if (helper && helperInfo && helperInfo.state === "running") helperCheckNote = "The helper is running.";
-      else if (helperInfo && (helperInfo.state === "not-installed" || helperProbe === "not-installed")) helperCheckNote = "Still not installed. Run the command above in a terminal, then press Check again.";
-      else if (helperProbe === "installed" || (helperInfo && helperInfo.state === "running")) helperCheckNote = "The helper is installed, but the tutor behind it did not answer yet. Press Check again in a moment.";
+      else if (helperInfo && (helperInfo.state === "not-installed" || helperProbe === "not-installed")) helperCheckNote = "Not installed yet.";
+      else if (helperProbe === "installed" || (helperInfo && helperInfo.state === "running")) helperCheckNote = "Installed, not answering yet. Try again.";
       else helperCheckNote = "Could not reach the helper. See the message below.";
       drawHelper();
       render();
@@ -718,10 +718,10 @@
   // "{provider}" is the chosen provider's name.
   const OFFLINE_COPY = {
     "relay-down": [
-      "{provider} runs through the helper app, which isn't set up or running yet. Set it up in the Helper section below. This page notices it by itself.",
+      "{provider} needs the helper app. Set it up in the Helper section below.",
     ],
     "companion-down": [
-      "The helper is running but the tutor behind it isn't. Press Check again in the Helper section below. This page reconnects on its own.",
+      "The helper isn't answering. Press Check again in the Helper section below.",
     ],
     "relay-old": [
       "The tutor running on this computer is from an older version without settings support. Close it, then press Check again in the Helper section below.",
@@ -782,7 +782,6 @@
       wrap.appendChild(h("div", { class: "keyline" }, h("span", { text: "Removing the key..." })));
     } else {
       wrap.appendChild(input);
-      if (id === "local") wrap.appendChild(h("p", { class: "hint", text: "Only needed if your server requires one." }));
     }
     return wrap;
   }
@@ -901,18 +900,12 @@
     } else {
       wrap.appendChild(input);
     }
-    if (field === "contextTokens") {
-      wrap.appendChild(h("p", { class: "hint", text: "How much text the model reads at once. Larger needs more memory; Ollama is asked for this window." }));
-    }
-    if (field === "baseUrl" && id === "openai") {
-      wrap.appendChild(h("p", { class: "hint", text: "Leave as is unless you use an OpenAI-compatible proxy." }));
-    }
     if (field === "baseUrl" && id === "local" && runtime === "extension") {
       wrap.appendChild(
         h(
           "p",
           { class: "hint" },
-          "Ollama answers the extension only if it is allowed to. Set this where Ollama runs, then restart it:",
+          "Allow this extension in Ollama, then restart it:",
           h("br"),
           h("code", { class: "nowrap", text: `OLLAMA_ORIGINS=${location.origin}` })
         )
@@ -928,7 +921,7 @@
   function runtimeRow(id) {
     const options = runtimesOf(id);
     if (options.length === 1) {
-      return h("p", { class: "hint runtime-note", text: "Runs through the helper app on your computer (it uses your local sign-in)." });
+      return h("p", { class: "hint runtime-note", text: "Runs through the helper app." });
     }
     const group = h("div", { class: "runtime", role: "radiogroup", "aria-label": "Where the tutor runs" });
     for (const runtime of options) {
@@ -968,7 +961,7 @@
     const chosen = draftProfiles.find((p) => p.id === draftActive);
     const named = chosen ? `Settings for ${profileName(chosen)}` : `${spec.label} settings`;
     const title = h("div", { class: "provider-title" }, named, id === "chatgpt" ? h("span", { class: "tag", text: "Experimental" }) : null);
-    const head = h("div", { class: "provider-head" }, h("div", {}, title, h("div", { class: "provider-hint", text: spec.hint })));
+    const head = h("div", { class: "provider-head" }, h("div", {}, title, id === "claude" || id === "chatgpt" ? h("div", { class: "provider-hint", text: spec.hint }) : null));
     const fields = h("div", { class: "fields" }, runtimeRow(id), ...spec.fields.map((f) => fieldFor(id, f)));
     return h("div", { class: "provider", "data-selected": true }, head, fields);
   }
@@ -979,7 +972,7 @@
       { class: "toggle" },
       h("input", { type: "checkbox", id, checked, disabled: locked || disabled }),
       h("label", { for: id, text: label }),
-      h("p", { class: "hint", text: hint })
+      hint ? h("p", { class: "hint", text: hint }) : null
     );
     const note = locked ? lockNote(id) : null;
     if (note) wrap.appendChild(note);
@@ -993,7 +986,7 @@
     const box = $("behavior");
     box.textContent = "";
     box.appendChild(
-      toggle("autoClearContext", "Start fresh when you switch problems", "The tutor forgets the previous problem, so old code never muddies a new one.", o.autoClearContext, {
+      toggle("autoClearContext", "Start fresh on each problem", "", o.autoClearContext, {
         locked: !inBrowser && helperLocked("autoClearContext"),
         disabled: off,
       })
@@ -1001,10 +994,8 @@
     box.appendChild(
       toggle(
         "vaultAutoSummary",
-        "Save Submit reviews to my Obsidian vault",
-        inBrowser
-          ? "Needs the helper app, which can write to your vault folder. Choose \"Through the helper app\" above to use it."
-          : "Turns the tutor's review of each Submit into a note. Needs a vault folder.",
+        "Save Submit reviews to Obsidian",
+        inBrowser ? "Needs the helper app." : "",
         inBrowser ? false : o.vaultAutoSummary,
         { locked: !inBrowser && helperLocked("vaultAutoSummary"), disabled: inBrowser || off }
       )
@@ -1013,9 +1004,9 @@
     const num = h(
       "div",
       { class: "toggle number" },
-      h("label", { for: "localMaxHistoryTurns", text: "Exchanges a local model remembers" }),
+      h("label", { for: "localMaxHistoryTurns", text: "Exchanges a local model remembers (0 = all)" }),
       h("input", { type: "number", id: "localMaxHistoryTurns", min: "0", max: "100", value: String(o.localMaxHistoryTurns), disabled: locked || off }),
-      h("p", { class: "hint", text: "Older exchanges are condensed into a short summary to fit a small context window. 0 keeps everything." })
+      null
     );
     const note = locked ? lockNote("localMaxHistoryTurns") : null;
     if (note) num.appendChild(note);
@@ -1032,14 +1023,14 @@
     if (runtimeOf(selected) === "extension") {
       foot.appendChild(
         document.createTextNode(
-          "Settings and API keys are stored in this browser's extension storage, where web pages can't read them. A key is only ever sent to the provider you choose."
+          "Stored in this browser's extension storage."
         )
       );
       return;
     }
-    foot.appendChild(document.createTextNode("Settings are stored in "));
+    foot.appendChild(document.createTextNode("Stored in "));
     foot.appendChild(h("code", { id: "path", text: helper ? helper.settings.settingsPath : "your config folder" }));
-    foot.appendChild(document.createTextNode(", readable only by you. API keys never leave your computer except to the provider you choose."));
+    foot.appendChild(document.createTextNode("."));
   }
 
   // Runs `draw`, which rebuilds part of the page, and puts the focus back on
@@ -1882,8 +1873,8 @@
       class: "prompt-intro",
       text:
         mode === "interviewer"
-          ? "Plays a mock interviewer: it asks the questions, gives hints only when you ask, and ends with feedback when you Submit."
-          : "Guides you toward the solution yourself, with hints that grow one step at a time and never hand over the answer.",
+          ? "A mock interviewer."
+          : "Guides you with small hints.",
     });
     const area = h("textarea", { id: "prompt-text", class: "prompt-text", spellcheck: "false", "aria-label": `${promptLabel(mode)} prompt`, "aria-describedby": "prompt-meta" });
     area.value = promptDrafts[mode];
@@ -1903,8 +1894,7 @@
     const fixed = h(
       "details",
       { class: "prompt-fixed" },
-      h("summary", { text: "Rules that always apply" }),
-      h("p", { text: "These are added after your prompt and can't be edited, so replies always draw diagrams and tables correctly." }),
+      h("summary", { text: "Fixed rules" }),
       h("pre", { text: ext.settings.promptFixed || "" })
     );
     $("prompts-body").replaceChildren(tabs, intro, area, meta, actions, fixed);
@@ -1930,7 +1920,7 @@
     promptDrafts[mode] = savedPrompt(mode);
     renderPrompts();
     const note = await mirrorPromptsToHelper((text) => showResult("prompt-result", "", text));
-    showResult("prompt-result", "ok", `${reset ? "Reset to the default." : "Saved."} A new conversation starts in the Tutor tab.${note ? ` ${note}` : ""}`);
+    showResult("prompt-result", "ok", `${reset ? "Reset." : "Saved."}${note ? ` ${note}` : ""}`);
   }
 
   // Gives the helper's tutor the same mode and prompts. Quiet when there is
@@ -1946,7 +1936,7 @@
       helper = res.result;
       return "";
     }
-    return `The helper app did not take it yet (${res.error.message}). It gets it the next time this page opens with the helper running.`;
+    return `The helper did not take it yet (${res.error.message}).`;
   }
 
   // A helper whose mode or prompts differ from the extension's (it was off

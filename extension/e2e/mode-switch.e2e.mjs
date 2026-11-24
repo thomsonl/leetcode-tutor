@@ -264,7 +264,7 @@ try {
   await scenario('Reset to default restores the original and starts another fresh conversation', async () => {
     await settings.send('Page.bringToFront');
     await settings.eval(`document.getElementById('prompt-reset').click()`);
-    await settings.waitFor(`document.getElementById('prompt-result').textContent.startsWith('Reset to the default.')`, { what: 'the reset' });
+    await settings.waitFor(`document.getElementById('prompt-result').textContent.startsWith('Reset.')`, { what: 'the reset' });
     const ui = await promptUi();
     check(ui.text === DEFAULT_PROMPTS.tutor && ui.state === 'Default prompt' && !ui.save && !ui.reset, JSON.stringify(ui));
     check((await stored()).prompts.tutor === null, 'stored as the default again');

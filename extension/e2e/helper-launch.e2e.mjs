@@ -272,8 +272,8 @@ try {
     const configFile = path.join(where.appDir, 'helper-config.json');
     await options.waitFor(`document.getElementById('helper-version-line')`, { what: 'the version line', timeout: 15000 });
     const line = await options.eval(`document.getElementById('helper-version-line').textContent`);
-    check(/^Version \d+\.\d+\.\d+\./.test(line), `version line: ${line}`);
-    check(!(await options.eval(`document.querySelector('#helper-body').textContent.includes('older than')`)), 'this helper is not called too old');
+    check(/^Version \d+\.\d+\.\d+/.test(line), `version line: ${line}`);
+    check(!(await options.eval(`document.querySelector('#helper-body').textContent.includes('too old')`)), 'this helper is not called too old');
     check(await options.eval(`document.getElementById('helper-auto-update').checked`), 'automatic update is on by default');
     check(JSON.parse(fs.readFileSync(configFile, 'utf8')).autoUpdate === true, 'the installer wrote the default');
     await options.eval(`document.getElementById('helper-auto-update').click()`);
@@ -322,7 +322,7 @@ try {
     const busy = await options.eval(`({ text: document.getElementById('helper-check').textContent, disabled: document.getElementById('helper-check').disabled })`);
     check(busy.text === 'Checking...' && busy.disabled, `busy button: ${JSON.stringify(busy)}`);
     await options.waitFor(`document.getElementById('helper-state-text').textContent === 'Not installed'`, { what: 'Not installed again', timeout: 10000 });
-    await options.waitFor(`/Still not installed/.test(document.getElementById('helper-check-note')?.textContent || '')`, { what: 'the Check again note', timeout: 10000 });
+    await options.waitFor(`/Not installed yet/.test(document.getElementById('helper-check-note')?.textContent || '')`, { what: 'the Check again note', timeout: 10000 });
     const after = await options.eval(`document.getElementById('helper-check').textContent`);
     check(after === 'Check again', `button after: ${after}`);
   });
@@ -487,7 +487,7 @@ try {
     await options3.waitFor(`document.getElementById('helper-state-text').textContent === 'Finishing setup'`, { what: 'Finishing setup', timeout: 12000 });
     const info = await options3.eval(`({ labels: window.__labels, body: document.getElementById('helper-body').textContent })`);
     check(!info.labels.includes('Not installed'), JSON.stringify(info.labels));
-    check(/opens again by itself/.test(info.body), info.body);
+    check(/reopens by itself/.test(info.body), info.body);
     await options3.eval(`document.getElementById('helper-card').scrollIntoView({ block: 'center' })`);
     await options3.screenshot(path.join(shots, 'helper-finishing-setup.png'), { width: 900, height: 1100 });
   });
@@ -562,7 +562,7 @@ try {
     await options3.eval(`window.__still = 1`);
     await options3.waitFor(`document.getElementById('helper-state-text').textContent === 'Restart the browser'`, { what: 'the restart note', timeout: 12000 });
     const body = await options3.eval(`document.getElementById('helper-body').textContent`);
-    check(/Close every browser window/.test(body), body);
+    check(/Restart the browser/.test(body), body);
     await sleep(6000);
     check((await options3.eval(`window.__still`)) === 1, 'the page was reloaded');
     check((await browser3.serviceWorkerEval('self.__reloads')) === 0, 'the worker reloaded again');

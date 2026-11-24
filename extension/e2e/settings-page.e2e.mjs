@@ -414,7 +414,7 @@ await scenario('two quick changes are saved one after the other, and the last on
 });
 
 for (const [status, pattern, kind] of [
-  [503, /helper is running but the tutor behind it isn't/, 'tutor not running'],
+  [503, /The helper isn't answering/, 'tutor not running'],
   [404, /older version without settings support/, 'old relay'],
 ]) {
   await scenario(`offline: ${kind}`, companion({ httpStatus: status }), async (page) => {
@@ -435,7 +435,7 @@ await scenario('no helper at all: a subscription points to the Helper section, t
   await useProvider(page, 'claude');
   await page.waitFor(`!document.getElementById('offline').hidden`, { what: 'the helper note' });
   const note = await text(page, '#offline');
-  assert.match(note, /^Claude subscription runs through the helper app, which isn't set up or running yet\. Set it up in the Helper section below\./);
+  assert.match(note, /^Claude subscription needs the helper app\. Set it up in the Helper section below\./);
   // No terminal command to start the tutor is ever mentioned.
   assert.equal(await page.eval(`document.querySelectorAll('#offline .aside, #offline code').length`), 0);
   assert.doesNotMatch(note, /localhost:8135|companion\.js|leetcode`|terminal/);

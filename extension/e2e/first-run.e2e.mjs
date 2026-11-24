@@ -371,7 +371,7 @@ try {
       waiting: document.getElementById('form').hasAttribute('data-disabled'),
     })`);
     check(/Set it up in the Helper section below/.test(seen.offline), `offline note: ${seen.offline}`);
-    check(!seen.helperHidden && seen.allow && /needs Node/.test(seen.helper), `helper section: ${seen.helper}`);
+    check(!seen.helperHidden && seen.allow && /Needs Node/.test(seen.helper), `helper section: ${seen.helper}`);
     check(seen.waiting, 'the form is not waiting for the helper');
     await options.screenshot(path.join(shots, 'subscription-no-helper-dark.png'), { width: 1280, height: 1300 });
   });
