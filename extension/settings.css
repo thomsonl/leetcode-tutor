@@ -249,6 +249,7 @@ form[data-disabled] .card:not(#helper-card):not(#model-card):not(#advanced-card)
 .add-profile .field { min-width: 0; }
 .add-profile .btn { white-space: nowrap; }
 .add-actions { display: flex; gap: 8px; }
+.add-profile .add-note { grid-column: 1 / -1; }
 #profiles-note { margin-top: 8px; }
 #profiles-note[data-kind="error"] { color: var(--red); }
 

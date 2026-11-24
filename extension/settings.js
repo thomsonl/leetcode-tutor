@@ -326,9 +326,7 @@
 
   // The form's choice so far, kept for the page that opens after a reload.
   function resumeRecord() {
-    const model = selected ? $(`${selected}-model`) : null;
-    const value = model && model.value !== OTHER ? model.value.trim() : "";
-    return { at: Date.now(), provider: selected, runtime: selected ? runtimeOf(selected) : null, model: value || null };
+    return { at: Date.now(), provider: selected, runtime: selected ? runtimeOf(selected) : null, model: selected ? chosenModel(selected) : null };
   }
 
   function saveResume() {
@@ -862,37 +860,15 @@
     const locked = isLocked(id, field);
     const required = catalog[id].requires.includes(field);
     const defaults = (runtime === "extension" ? ext.settings.defaults[id] : helper && helper.settings.defaults[id]) || {};
-    const raw = field === "model" && info && Object.prototype.hasOwnProperty.call(formModel, id) && !locked ? formModel[id] : info ? info[field] : null;
+    const raw = info ? info[field] : null;
     const value = raw === null || raw === undefined ? "" : String(raw);
     const attrs = { id: `${id}-${field}`, autocomplete: "off", spellcheck: "false", disabled: locked || !info };
-    let input;
-    if (field === "contextTokens") {
-      input = h("input", { ...attrs, type: "number", min: "1024", max: "2000000", step: "1024", value });
-    } else if (field === "model" && id === "local" && !typeModelByHand[id]) {
-      input = modelSelect(id, value, attrs);
-    } else if (field === "model" && id === "claude" && !typeModelByHand[id]) {
-      input = presetSelect(value, attrs, id);
-    } else {
-      input = h("input", {
-        ...attrs,
-        type: "text",
-        value,
-        placeholder: field === "model" ? (required ? "Model name" : defaults.model || "Default") : defaults[field] || "",
-        list: field === "model" && id !== "local" ? `${id}-models` : false,
-      });
-    }
+    const input =
+      field === "contextTokens"
+        ? h("input", { ...attrs, type: "number", min: "1024", max: "2000000", step: "1024", value })
+        : h("input", { ...attrs, type: "text", value, placeholder: defaults[field] || "" });
     const label = h("label", { for: `${id}-${field}` }, FIELD_LABELS[field], required ? null : h("span", { class: "opt", text: " (optional)" }));
-    const wrap = h("div", { class: "field" }, label);
-    const findable = field === "model" && (id === "local" || id === "openai" || (id === "anthropic" && runtime === "extension"));
-    if (findable) {
-      wrap.appendChild(
-        h("div", { class: "row" }, input, h("button", { type: "button", class: "btn", id: `${id}-find`, text: id === "local" ? "Refresh" : "Find models", disabled: locked || !info, onclick: () => findModels(id) }))
-      );
-      if (id !== "local") wrap.appendChild(h("datalist", { id: `${id}-models` }));
-      wrap.appendChild(h("p", { class: "hint", id: `${id}-models-note`, text: modelsNote[id] || "" }));
-    } else {
-      wrap.appendChild(input);
-    }
+    const wrap = h("div", { class: "field" }, label, input);
     if (field === "baseUrl" && id === "local" && runtime === "extension") {
       wrap.appendChild(
         h(
@@ -955,7 +931,8 @@
     const named = chosen ? `Settings for ${profileName(chosen)}` : `${spec.label} settings`;
     const title = h("div", { class: "provider-title" }, named, id === "chatgpt" ? h("span", { class: "tag", text: "Experimental" }) : null);
     const head = h("div", { class: "provider-head" }, h("div", {}, title, id === "claude" || id === "chatgpt" ? h("div", { class: "provider-hint", text: spec.hint }) : null));
-    const fields = h("div", { class: "fields" }, runtimeRow(id), ...spec.fields.map((f) => fieldFor(id, f)));
+    const modelLock = isLocked(id, "model") ? lockNote("model") : null;
+    const fields = h("div", { class: "fields" }, runtimeRow(id), ...spec.fields.filter((f) => f !== "model").map((f) => fieldFor(id, f)), modelLock);
     return h("div", { class: "provider", "data-selected": true }, head, fields);
   }
 
@@ -1055,10 +1032,23 @@
     keepingFocus(drawAll);
   }
 
+  // The provider whose card was drawn last, so what is typed in it (and not
+  // saved yet) survives a redraw for the same provider, such as adding a model.
+  let drawnProvider = null;
+
   function drawAll() {
     const fieldset = $("providers");
+    const typed = {};
+    if (drawnProvider === selected) {
+      for (const el of fieldset.querySelectorAll("input[id]")) if (el.type !== "radio" && el.type !== "checkbox" && !el.disabled) typed[el.id] = el.value;
+    }
     for (const node of [...fieldset.children]) if (node.tagName !== "LEGEND") node.remove();
     if (catalog[selected]) fieldset.appendChild(providerCard(selected));
+    drawnProvider = selected;
+    for (const [elId, v] of Object.entries(typed)) {
+      const el = $(elId);
+      if (el && el.type !== "radio" && el.type !== "checkbox" && !el.disabled) el.value = v;
+    }
     renderBehavior();
     renderHelper();
     renderOffline();
@@ -1066,7 +1056,7 @@
     renderFoot();
     renderProfiles();
     // The local model's dropdown is only there while that model is selected.
-    if (selected === "local") autoFindModels("local");
+    if (selected === "local" || addProvider === "local") autoFindModels("local");
     const can = usable(selected);
     $("test").disabled = !can;
     if (can) $("form").removeAttribute("data-disabled");
@@ -1119,6 +1109,14 @@
   const formModel = {}; // provider -> the model its card shows for the default
   let renaming = null; // the id being renamed
   let addProvider = "local";
+
+  // The model of the selected list row (or the last one used for the
+  // provider). The rows are where models are chosen, not the provider card.
+  function chosenModel(provider) {
+    const active = draftProfiles.find((p) => p.id === draftActive);
+    if (active && active.provider === provider) return active.model || null;
+    return formModel[provider] || null;
+  }
 
   function newProfileId(provider) {
     const bytes = new Uint8Array(4);
@@ -1378,13 +1376,19 @@
         spellcheck: "false",
         value: addProvider === "local" ? keepModel : "",
         placeholder: required ? "Model name" : defaultModelOf(addProvider) || "Default",
-        list: addProvider !== "local" && $(`${addProvider}-models`) ? `${addProvider}-models` : false,
       });
     }
     const label = h("input", { type: "text", id: "add-label", autocomplete: "off", maxlength: "60", placeholder: "Optional", value: keepLabel });
     row.append(
       h("div", { class: "field" }, h("label", { for: "add-provider", text: "Provider" }), select),
-      h("div", { class: "field" }, h("label", { for: "add-model", text: "Model" }), model),
+      h(
+        "div",
+        { class: "field" },
+        h("label", { for: "add-model", text: "Model" }),
+        addProvider === "local" && !typeModelByHand.add
+          ? h("div", { class: "row" }, model, h("button", { type: "button", class: "btn", id: "local-find", text: "Refresh", onclick: () => findModels("local") }))
+          : model
+      ),
       h("div", { class: "field" }, h("label", { for: "add-label" }, "Name", h("span", { class: "opt", text: " (optional)" })), label),
       h(
         "div",
@@ -1406,6 +1410,7 @@
           : null
       )
     );
+    if (addProvider === "local") row.appendChild(h("p", { class: "hint add-note", id: "local-models-note", text: modelsNote.local || "" }));
   }
 
   function addProfile() {
@@ -1449,25 +1454,16 @@
     });
   }
 
-  // The list and default to save: the default follows the provider card
-  // (its provider and its model). Same provider: the default's model is
-  // edited in place, unless another saved entry already is that model, which
-  // then becomes the default. Another provider: an entry with that provider
-  // and model becomes the default, or a new one is added for it.
+  // The list and default to save: the default is the selected row. When the
+  // selected provider has no row yet (a first run, before anything is added),
+  // an entry is made for it.
   function profilesForSave() {
     const provider = selected;
-    const input = $(`${provider}-model`);
-    const locked = isLocked(provider, "model");
-    const typed = input && !locked ? input.value.trim() : "";
-    const model = typed && typed !== OTHER ? typed : null;
     const list = draftProfiles.map((p) => ({ ...p }));
     let active = list.find((p) => p.id === draftActive) || null;
-    const same = list.find((p) => p !== active && p.provider === provider && (p.model || null) === model);
-    if (active && active.provider === provider) {
-      if (same) active = same;
-      else if (!locked) active.model = model;
-    } else {
-      active = same || null;
+    if (!active || active.provider !== provider) {
+      const model = chosenModel(provider);
+      active = list.find((p) => p.provider === provider && (p.model || null) === model) || null;
       if (!active) {
         active = { id: newProfileId(provider), provider, model, label: null };
         list.push(active);
@@ -1495,6 +1491,10 @@
           const typed = input ? input.value.trim() : "";
           if (typed) fields.apiKey = typed;
         }
+        continue;
+      }
+      if (field === "model") {
+        fields.model = chosenModel(id);
         continue;
       }
       const raw = $(`${id}-${field}`).value.trim();
@@ -1546,15 +1546,21 @@
   // ---- actions ----------------------------------------------------------------------------
 
   async function findModels(id, { quiet = false } = {}) {
+    if (id !== "local") return;
     const inBrowser = runtimeOf(id) === "extension";
     // Asked first, while this still counts as the click.
     const pattern = inBrowser ? originPatternFor(id) : null;
     const allowed = inBrowser && !quiet ? requestPermission(pattern) : Promise.resolve(true);
-    const note = $(`${id}-models-note`);
-    const button = $(`${id}-find`);
-    if (!button || !note) return;
-    button.disabled = true;
-    note.textContent = "Looking";
+    // The Refresh button and its note are in the add row, which may be closed.
+    const say = (text) => {
+      modelsNote[id] = text;
+      if ($(`${id}-models-note`)) $(`${id}-models-note`).textContent = text;
+    };
+    const busy = (on) => {
+      if ($(`${id}-find`)) $(`${id}-find`).disabled = on;
+    };
+    busy(true);
+    say("Looking");
     const baseInput = $(`${id}-baseUrl`);
     const keyInput = $(`${id}-apiKey`);
     const params = {
@@ -1563,38 +1569,27 @@
       apiKey: keyInput && keyInput.value.trim() ? keyInput.value.trim() : undefined,
     };
     if (!(await allowed)) {
-      button.disabled = false;
-      note.textContent = deniedMessage(pattern);
+      busy(false);
+      say(deniedMessage(pattern));
       return;
     }
-    const res = inBrowser ? await worker("lc-tutor:settings-models", params) : await rpcStarting("models", params, undefined, (t) => (note.textContent = t));
-    button.disabled = false;
+    const res = inBrowser ? await worker("lc-tutor:settings-models", params) : await rpcStarting("models", params, undefined, say);
+    busy(false);
     if (!res.ok) {
-      note.textContent = res.error.message;
+      say(res.error.message);
       return;
     }
     const names = res.result.models;
-    const message = names.length ? `Found ${names.length}.` : res.result.message || "No models found.";
-    if (id === "local") {
-      foundModels[id] = names;
-      modelsNote[id] = names.length ? `Found ${names.filter((n) => !NOT_CHAT.test(n)).length} models you can chat with.` : message;
-      // Keep what is typed in the other fields across the redraw.
-      const keep = {};
-      for (const el of document.querySelectorAll("#providers input[id], #providers select[id]")) keep[el.id] = el.value;
-      const keptModel = $(`${id}-model`) ? $(`${id}-model`).value : "";
-      render();
-      for (const [elId, v] of Object.entries(keep)) {
-        const el = $(elId);
-        if (el && el.tagName === "INPUT" && el.type !== "radio" && el.type !== "checkbox" && elId !== `${id}-model`) el.value = v;
-      }
-      const sel = $(`${id}-model`);
-      if (sel && keptModel && sel.tagName === "SELECT" && [...sel.options].some((o) => o.value === keptModel)) sel.value = keptModel;
-      return;
+    foundModels[id] = names;
+    say(names.length ? `Found ${names.filter((n) => !NOT_CHAT.test(n)).length} models you can chat with.` : res.result.message || "No models found.");
+    // Keep what is typed in the other fields across the redraw.
+    const keep = {};
+    for (const el of document.querySelectorAll("#providers input[id], #providers select[id]")) keep[el.id] = el.value;
+    render();
+    for (const [elId, v] of Object.entries(keep)) {
+      const el = $(elId);
+      if (el && el.tagName === "INPUT" && el.type !== "radio" && el.type !== "checkbox") el.value = v;
     }
-    const list = $(`${id}-models`);
-    list.textContent = "";
-    for (const name of names) list.appendChild(h("option", { value: name }));
-    note.textContent = names.length ? `${message} Start typing the model field to pick one.` : message;
   }
 
   async function runTest() {
@@ -1626,7 +1621,7 @@
     // Not saved, and the form keeps what was entered: fixing the field saves
     // again. Focus is not moved, since the student may be typing elsewhere.
     showResult("save-result", "error", `Not saved. ${error.message.charAt(0).toUpperCase()}${error.message.slice(1)}`);
-    const target = error.field ? $(`${selected}-${error.field}`) : null;
+    const target = error.field === "model" ? $(`profile-${draftActive}-radio`) : error.field ? $(`${selected}-${error.field}`) : null;
     if (target) target.setAttribute("aria-invalid", "true");
     // A removal the helper refused leaves the key as it was.
     const runtime = runtimeOf(selected);

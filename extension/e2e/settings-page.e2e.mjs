@@ -127,21 +127,15 @@ async function scenario(name, mock, run) {
 // "Saving..." is shown while a request is in flight; a result replaces it.
 const SAVE_DONE = `(() => { const t = document.getElementById('save-result').textContent; return t.length > 0 && t !== 'Saving...'; })()`;
 const text = (page, selector) => page.eval(`(document.querySelector(${JSON.stringify(selector)}) || {}).textContent || ''`);
-// The local model is a dropdown; a name the list lacks goes through "Other".
-const pickLocalModel = async (page, name) => {
-  await page.eval(`(() => {
-    const s = document.getElementById('local-model');
-    if (s.tagName !== 'SELECT') return;
-    const has = [...s.options].some((o) => o.value === ${JSON.stringify(name)});
-    s.value = has ? ${JSON.stringify(name)} : '__other__';
-    s.dispatchEvent(new Event('change', { bubbles: true }));
-  })()`);
-  if (await page.eval(`document.getElementById('local-model').tagName === 'INPUT'`)) {
-    await page.type('#local-model', name);
-    // Leaving the box is what saves the name, as it is for a student.
-    await leave(page, '#local-model');
-  }
-};
+const profileRows = (page) => page.eval(`[...document.querySelectorAll('#profiles .profile')].map((r) => ({
+  id: r.dataset.id,
+  name: r.querySelector('.profile-name') ? r.querySelector('.profile-name').textContent : null,
+  meta: r.querySelector('.profile-meta') ? r.querySelector('.profile-meta').textContent : null,
+  isDefault: r.hasAttribute('data-default'),
+}))`);
+// Models are chosen in the add row (the local one is a dropdown; a name the
+// list lacks goes through "Other"): adding makes the model the default.
+const pickLocalModel = (page, name) => useProvider(page, 'local', name);
 const value = (page, selector) => page.eval(`document.querySelector(${JSON.stringify(selector)}).value`);
 const lastCall = (page, method) => [...page.mockedRequests].reverse().find((r) => r.body && r.body.method === method);
 // Settings save themselves. A student edits a field and leaves it, which is
@@ -211,15 +205,16 @@ await scenario('first run shows the historic default (Claude subscription) and t
 
 const localStored = applyPatch(emptySettings(), { provider: 'local', providers: { local: { model: 'gpt-oss:20b' } }, options: { vaultAutoSummary: true } });
 await scenario('a saved local model fills the form, and "Find models" suggests what the server has', companion({ stored: localStored }), async (page) => {
-  assert.equal(await value(page, '#local-model'), 'gpt-oss:20b');
+  assert.deepEqual((await profileRows(page)).map((r) => r.name), ['gpt-oss:20b']);
+  assert.equal(await page.eval(`document.getElementById('local-model')`), null, 'the card has no second model picker');
   assert.equal(await value(page, '#local-baseUrl'), 'http://localhost:11434/v1');
   assert.equal(await value(page, '#local-contextTokens'), '8192');
   assert.equal(await page.eval(`document.getElementById('vaultAutoSummary').checked`), true);
+  await openAdd(page);
   await page.click('#local-find');
   await page.waitFor(`/Found 2/.test(document.getElementById('local-models-note').textContent)`, { what: 'model suggestions' });
-  assert.equal(await page.eval(`document.getElementById('local-model').tagName`), 'SELECT', 'the model is a dropdown');
-  assert.equal(await page.eval(`document.getElementById('local-model').value`), 'gpt-oss:20b', 'the saved model stays selected after a refresh');
-  assert.equal(await page.eval(`[...document.getElementById('local-model').options].some((o) => o.value === '__other__')`), true);
+  assert.equal(await page.eval(`document.getElementById('add-model').tagName`), 'SELECT', 'the add row offers a dropdown of the server\'s models');
+  assert.equal(await page.eval(`[...document.getElementById('add-model').options].some((o) => o.value === '__other__')`), true);
   const sent = lastCall(page, 'models').body.params;
   assert.deepEqual([sent.provider, sent.baseUrl], ['local', 'http://localhost:11434/v1']);
   await page.screenshot(path.join(shots, 'local-dark.png'), { scheme: 'dark' });
@@ -279,8 +274,7 @@ await scenario('environment variables lock their fields and are never sent back 
   stored: applyPatch(emptySettings(), { providers: { local: { model: 'saved-model' } } }),
   env: { COMPANION_BACKEND: 'local', COMPANION_MODEL: 'env-model', VAULT_AUTO_SUMMARY: '1' },
 }), async (page) => {
-  assert.equal(await value(page, '#local-model'), 'saved-model', 'the saved value is shown');
-  assert.equal(await page.eval(`document.getElementById('local-model').disabled`), true);
+  assert.equal(await page.eval(`document.getElementById('local-model')`), null, 'no model picker in the card');
   assert.match(await text(page, '#providers'), /Set by COMPANION_MODEL in your environment/);
   assert.equal(await page.eval(`document.getElementById('local-runtime-helper').checked`), true, 'an existing helper setup stays on the helper');
   assert.equal(await page.eval(`document.getElementById('vaultAutoSummary').disabled`), true);
@@ -301,8 +295,8 @@ await scenario('a refused save shows the reason, marks the offending field and l
   await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Not saved')`);
   assert.equal(await text(page, '#save-result'), 'Not saved. Model can\'t be empty');
   assert.equal(await page.eval(`document.getElementById('save-result').getAttribute('data-kind')`), 'error');
-  assert.equal(await page.eval(`document.getElementById('local-model').getAttribute('aria-invalid')`), 'true');
-  assert.notEqual(await page.eval(`document.activeElement && document.activeElement.id`), 'local-model', 'focus is not pulled away from what is being typed');
+  assert.equal(await page.eval(`document.querySelector('#profiles input[type=radio]:checked').getAttribute('aria-invalid')`), 'true', 'the selected model is marked');
+  assert.notEqual(await page.eval(`(document.activeElement || {}).type`), 'radio', 'focus is not pulled away from what is being typed');
 });
 
 await scenario('a failing connection test is reported as an error, not as success', companion({ testResult: { ok: false, message: 'ChatGPT sign-in: not logged in. Run "codex login".' } }), async (page) => {
@@ -494,7 +488,8 @@ function stubServer({ status = 200 } = {}) {
     assert.match(await text(page, '#providers'), /OLLAMA_ORIGINS=chrome-extension:\/\//);
     assert.match(await text(page, '#foot'), /extension storage/);
     await page.type('#local-baseUrl', model.url);
-    await page.click('#local-find');
+    await openAdd(page);
+  await page.click('#local-find');
     await page.waitFor(`/Found 2/.test(document.getElementById('local-models-note').textContent)`, { what: 'model suggestions from the stub' });
     await pickLocalModel(page, 'qwen3:8b');
     await page.click('#test');
@@ -547,7 +542,6 @@ await scenario('browser runtime: a denied permission prompt says what happened a
   await page.eval(`chrome.permissions.request = () => Promise.resolve(false)`);
   await page.type('#local-baseUrl', 'http://192.0.2.10:11434/v1');
   await pickLocalModel(page, 'llama3.2');
-  await leave(page, '#local-model');
   await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Not saved')`, { what: 'the refusal' });
   assert.equal(await page.eval(`document.getElementById('save-result').getAttribute('data-kind')`), 'error');
   assert.match(await text(page, '#save-result'), /^Not saved: the browser has not allowed the extension to reach http:\/\/192\.0\.2\.10\./);
@@ -576,12 +570,6 @@ await scenario('browser runtime: a denied permission prompt says what happened a
 
 // ---- models in the Tutor tab (profiles) ----------------------------------------
 
-const profileRows = (page) => page.eval(`[...document.querySelectorAll('#profiles .profile')].map((r) => ({
-  id: r.dataset.id,
-  name: r.querySelector('.profile-name') ? r.querySelector('.profile-name').textContent : null,
-  meta: r.querySelector('.profile-meta') ? r.querySelector('.profile-meta').textContent : null,
-  isDefault: r.hasAttribute('data-default'),
-}))`);
 const pickAddModel = async (page, name) => {
   await page.eval(`(() => {
     const s = document.getElementById('add-model');
@@ -603,7 +591,8 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
   const model = await stubServer();
   await scenario('models card: add several local models, rename, reorder, remove, choose the default and save', null, async (page) => {
     await page.type('#local-baseUrl', model.url);
-    await page.click('#local-find');
+    await openAdd(page);
+  await page.click('#local-find');
     await page.waitFor(`/Found 2/.test(document.getElementById('local-models-note').textContent)`, { what: 'model suggestions' });
     await pickLocalModel(page, 'qwen3:8b');
     await page.waitFor(SAVED, { what: 'the first save', timeout: 20000 });
@@ -620,7 +609,7 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
     await page.click('#add-profile-button');
     // A model added is used at once: it becomes the default and is saved.
     await page.waitFor(`document.getElementById('connection-text').textContent.endsWith('gemma4:26b')`, { what: 'the added model saved and running', timeout: 20000 });
-    assert.equal(await value(page, '#local-model'), 'gemma4:26b', 'its settings show below the list');
+    assert.equal((await profileRows(page)).find((r) => r.isDefault).name, 'Gemma', 'the added model is the selected one');
     // A model the list already has is refused.
     await openAdd(page);
     await pickAddModel(page, 'qwen3:8b');
@@ -667,23 +656,14 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
 
     // Choosing the default moves the settings below the list to that model, and saves.
     await page.click(`#profile-${qwen}-radio`);
-    assert.equal(await value(page, '#local-model'), 'qwen3:8b');
     await page.waitFor(`document.getElementById('connection-text').textContent.endsWith('qwen3:8b')`, { what: 'qwen saved as the default', timeout: 20000 });
     await page.click(`#profile-${gemma}-radio`);
-    assert.equal(await value(page, '#local-model'), 'gemma4:26b');
     await page.waitFor(`document.getElementById('connection-text').textContent.endsWith('gemma4:26b')`, { what: 'the save', timeout: 20000 });
     assert.equal(await text(page, '#connection-text'), 'Tutor running in the browser: Local model, gemma4:26b');
     const stored = await browser.serviceWorkerEval(`chrome.storage.local.get(null)`);
     assert.deepEqual(stored.tutorSettings.profiles.map((p) => [p.provider, p.model, p.label]), [['local', 'gemma4:26b', 'Gemma'], ['local', 'qwen3:8b', 'Qwen']]);
     assert.equal(stored.tutorSettings.activeProfile, gemma);
     assert.equal(stored.tutorSettings.providers.local.model, 'gemma4:26b');
-    // Editing the default's model in its card edits that entry.
-    await pickLocalModel(page, 'qwen3:8b');
-    await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved') && document.getElementById('connection-text').textContent.endsWith('qwen3:8b')`, { what: 'the save of an existing model', timeout: 20000 });
-    const again = await browser.serviceWorkerEval(`chrome.storage.local.get(null)`);
-    assert.equal(again.tutorSettings.profiles.length, 2, 'picking a model already saved makes it the default, no duplicate');
-    assert.equal(again.tutorSettings.profiles.find((p) => p.id === again.tutorSettings.activeProfile).label, 'Qwen');
-
     // A name being typed is kept when another row's rename starts, and by Save.
     await mouseClick(page, `#profile-${qwen}-rename`);
     await page.type(`#profile-${qwen}-label`, 'Qwen 3');
@@ -755,16 +735,12 @@ await scenario('models card: subscription models are kept by the helper too, and
   await page.screenshot(path.join(shots, 'models-card-helper-dark.png'), { scheme: 'dark' });
 });
 
-await scenario('the Claude subscription card: a dropdown of Claude Code model names, a saved alias is selected, Other types one', companion({
+await scenario('the Claude subscription: a saved alias is shown by its friendly name, and the card has no second model picker', companion({
   stored: applyPatch(emptySettings(), { provider: 'claude', providers: { claude: { model: 'opus' } } }),
 }), async (page) => {
-  const m = await page.eval(`(() => { const s = document.getElementById('claude-model'); return { tag: s.tagName, value: s.value, options: [...s.options].map((o) => o.textContent) }; })()`);
-  assert.equal(m.tag, 'SELECT');
-  assert.equal(m.value, 'opus', 'a saved alias is the selected one');
-  assert.equal(await text(page, '#connection-text'), 'Tutor running: Claude subscription, Opus (latest)', 'the header names the alias as the dropdown does');
-  assert.deepEqual(m.options, ['Default', 'Sonnet (latest)', 'Opus (latest)', 'Haiku (latest)', 'Other (type a name)...']);
-  await page.eval(`(() => { const s = document.getElementById('claude-model'); s.value = '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-  assert.equal(await page.eval(`document.getElementById('claude-model').tagName`), 'INPUT', '"Other" turns it into a text box');
+  assert.equal(await page.eval(`document.getElementById('claude-model')`), null, 'the rows are where a model is chosen');
+  assert.equal(await text(page, '#connection-text'), 'Tutor running: Claude subscription, Opus (latest)', 'the header names the alias as the add dropdown does');
+  assert.equal((await profileRows(page))[0].name, 'Opus (latest)');
   await page.screenshot(path.join(shots, 'claude-model-dark.png'), { scheme: 'dark' });
 });
 
@@ -859,7 +835,7 @@ await liveScenario('live: the page reads, tests and saves through the real relay
   assert.match(await text(page, '#connection-text'), /Tutor running: Local model, model-a/);
   const origins = new Set(page.redirectedRequests.map((r) => r.headers.Origin || r.headers.origin));
   assert.deepEqual([...origins], [`chrome-extension://${browser.extensionId}`], 'the page sends its extension origin');
-  assert.equal(await value(page, '#local-model'), 'model-a');
+  assert.deepEqual((await profileRows(page)).map((r) => r.name), ['model-a']);
   // Both fields are filled before the first one is left, so the one save has both.
   await page.type('#local-baseUrl', live.modelB.url);
   await pickLocalModel(page, 'model-b');
@@ -871,9 +847,9 @@ await liveScenario('live: the page reads, tests and saves through the real relay
   assert.match(await text(page, '#connection-text'), /Tutor running: Local model, model-b/);
   const saved = JSON.parse(fs.readFileSync(live.settingsFile, 'utf8'));
   assert.deepEqual([saved.provider, saved.providers.local.model, saved.providers.local.baseUrl], ['local', 'model-b', live.modelB.url]);
-  // The default saved model became model-b in place, and the companion keeps the list.
-  assert.deepEqual(saved.profiles.map((p) => [p.provider, p.model]), [['local', 'model-b']]);
-  assert.equal(saved.activeProfile, saved.profiles[0].id);
+  // The added model is the default, and the companion keeps the list.
+  assert.deepEqual(saved.profiles.map((p) => [p.provider, p.model]), [['local', 'model-a'], ['local', 'model-b']]);
+  assert.equal(saved.activeProfile, saved.profiles[1].id);
   assert.equal(fs.statSync(live.settingsFile).mode & 0o777, 0o600);
   const deadline = Date.now() + 5000;
   while (!live.out().includes('settings saved - now using Local model (model-b)')) {

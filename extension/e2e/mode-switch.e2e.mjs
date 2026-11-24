@@ -83,10 +83,10 @@ try {
   await options.send('Page.navigate', { url: `chrome-extension://${browser.extensionId}/settings.html` });
   await options.waitFor(`document.getElementById('connection-text').textContent === 'Not set up'`, { what: 'the options page' });
   await options.type('#local-baseUrl', modelUrl);
-  await options.eval(`(() => { const s = document.getElementById('local-model'); s.value = '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-  await options.type('#local-model', 'stub-model');
-  // Leaving the field saves it (the page has no Save button).
-  await options.eval(`document.getElementById('local-model').dispatchEvent(new Event('change', { bubbles: true }))`);
+  await // Models are chosen in the add row; the model is typed through "Other" (this stub lists nothing).
+  await await options.eval(`(() => { const p = document.getElementById('add-provider'); p.value = 'local'; p.dispatchEvent(new Event('change', { bubbles: true })); const s = document.getElementById('add-model'); s.value = '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await await options.type('#add-model', 'stub-model');
+  await await options.click('#add-profile-button');
   await options.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the save' });
   options.close();
 

@@ -109,7 +109,15 @@ async function pickModel(options, provider, labelText, model = '') {
   await options.click('#add-profile-button');
 }
 // A field left after an edit: the page saves it (it has no Save button).
-const leaveClaudeModel = (o) => o.eval(`document.getElementById('claude-model').dispatchEvent(new Event('change', { bubbles: true }))`);
+// (The provider card has no model field now; any form field's change saves the form.)
+const leaveClaudeModel = (o) => o.eval(`document.getElementById('autoClearContext').dispatchEvent(new Event('change', { bubbles: true }))`);
+// Adds a model row through the add row, whatever the list already holds.
+async function addModel(options, provider, model) {
+  if (await options.eval(`!document.getElementById('add-provider')`)) await options.click('#add-toggle');
+  await options.eval(`(() => { const s = document.getElementById('add-provider'); s.value = ${JSON.stringify(provider)}; s.dispatchEvent(new Event('change', { bubbles: true })); const m = document.getElementById('add-model'); m.value = ${JSON.stringify(model)}; })()`);
+  await options.click('#add-profile-button');
+}
+const hasRow = (name) => `[...document.querySelectorAll('#profiles .profile-name')].some((n) => n.textContent === ${JSON.stringify(name)})`;
 const formReady = `!document.getElementById('form').hasAttribute('data-disabled')`;
 
 function check(condition, message) {
@@ -478,7 +486,7 @@ try {
   });
 
   let options3 = await openOptions(browser3);
-  await options3.eval(`(() => { const s = document.getElementById('claude-model'); s.value = 'opus'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await addModel(options3, 'claude', 'opus');
   await browser3.serviceWorkerEval(`(() => { self.__reloads = 0; chrome.runtime.reload = () => { self.__reloads += 1; }; delete chrome.runtime.connectNative; })()`);
   await options3.eval(`delete chrome.runtime.connectNative`);
   await watchLabels(options3);
@@ -522,7 +530,7 @@ try {
     }
     check(target, 'the options page did not open');
     options3 = await browser3.attachPage((url) => url === target.url);
-    await options3.waitFor(`document.getElementById('claude-model')`, { what: 'Claude chosen again', timeout: 10000 }).catch(async (err) => {
+    await options3.waitFor(`document.querySelector('#providers .provider-title')`, { what: 'Claude chosen again', timeout: 10000 }).catch(async (err) => {
       // Say what the reopened page held, so a timeout is diagnosable.
       const seen = await options3.eval(`JSON.stringify({ title: (document.querySelector('#providers .provider-title') || {}).textContent, note: document.getElementById('save-result') && document.getElementById('save-result').textContent, helper: document.getElementById('helper-state-text') && document.getElementById('helper-state-text').textContent, ready: document.readyState })`).catch((e) => String(e));
       const stored = await options3.eval(`chrome.storage.local.get(null).then((v) => JSON.stringify({ resume: v.settingsResume, reload: v.nativeReload }))`).catch((e) => String(e));
@@ -533,10 +541,8 @@ try {
     await options3.waitFor(`document.getElementById('helper-state-text').textContent === 'Running'`, { what: 'Running', timeout: 20000 });
     await options3.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the choice saved by itself', timeout: 30000 });
     check(await options3.eval(`document.getElementById('wait-note').hidden`), 'the wait note and the saved note showed together');
-    // The model field fills in once the helper answers (it shows the helper's settings).
-    await options3.waitFor(`document.getElementById('claude-model').value === 'opus'`, { what: 'the carried model', timeout: 15000 }).catch(async (err) => {
-      throw new Error(`${err.message}: ${await options3.eval(`document.getElementById('claude-model').value`)}`);
-    });
+    // The carried model is in the list once the helper answers.
+    await options3.waitFor(hasRow('Opus (latest)'), { what: 'the carried model', timeout: 15000 });
     const stored = await options3.eval(`chrome.storage.local.get(null)`);
     check(!stored.settingsResume, `resume record left: ${JSON.stringify(stored.settingsResume)}`);
     check(!stored.nativeReload, `reload guard left: ${JSON.stringify(stored.nativeReload)}`);
@@ -551,8 +557,9 @@ try {
   });
 
   await scenario('only the options page behind: it reloads itself and keeps the choice', async () => {
-    await options3.eval(`(() => { const s = document.getElementById('claude-model'); s.value = 'haiku'; s.dispatchEvent(new Event('change', { bubbles: true })); window.__before = 1; delete chrome.runtime.connectNative; })()`);
-    await options3.waitFor(`window.__before === undefined && document.readyState === 'complete' && document.getElementById('claude-model') && document.getElementById('claude-model').value === 'haiku'`, { what: 'the page to reload with the choice', timeout: 15000 });
+    await options3.eval(`(() => { window.__before = 1; delete chrome.runtime.connectNative; })()`);
+    await addModel(options3, 'claude', 'haiku');
+    await options3.waitFor(`window.__before === undefined && document.readyState === 'complete' && ${hasRow('Haiku (latest)')}`, { what: 'the page to reload with the choice', timeout: 15000 });
     await options3.waitFor(`document.getElementById('helper-state-text').textContent === 'Running'`, { what: 'Running', timeout: 15000 });
   });
 

@@ -281,8 +281,7 @@ async function useProvider(options, provider, model = '') {
 }
 async function pickLocal(options, baseUrl) {
   await options.type('#local-baseUrl', baseUrl);
-  await options.eval(`(() => { const s = document.getElementById('local-model'); if (s.tagName === 'SELECT') { s.value = '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); } })()`);
-  await options.type('#local-model', 'llama3.2');
+  await useProvider(options, 'local', 'llama3.2');
 }
 try {
   const options = await openOptions(browser2);
@@ -315,12 +314,11 @@ try {
         await useProvider(options, 'openai', 'gpt-5-mini');
         await options.type('#openai-apiKey', 'sk-bad');
         await options.type('#openai-baseUrl', s.url);
-        await options.type('#openai-model', 'gpt-5-mini');
       });
       check(r.kind === 'error' && /Incorrect API key/.test(r.text) && /401/.test(r.text), JSON.stringify(r));
       check(!r.text.includes('OLLAMA_ORIGINS'), 'the Ollama fix shows for OpenAI');
       const stored = await browser2.serviceWorkerEval(`chrome.storage.local.get(null)`);
-      check(!stored.tutorSecrets, `a key was stored by a test: ${JSON.stringify(stored)}`);
+      check(!Object.values(stored.tutorSecrets || {}).some(Boolean), `a key was stored by a test: ${JSON.stringify(stored)}`);
     } finally {
       s.server.close();
     }
