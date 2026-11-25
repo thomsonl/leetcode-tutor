@@ -307,21 +307,18 @@ try {
     }
   });
 
-  await scenario('an invalid OpenAI key: the provider\'s own reason, and nothing saved', async () => {
-    const s = await stub(401, { error: { message: 'Incorrect API key provided: sk-bad. You can find your API key at https://platform.openai.com/account/api-keys.', type: 'invalid_request_error', code: 'invalid_api_key' } });
-    try {
-      const r = await testWith(options, async () => {
-        await useProvider(options, 'openai', 'gpt-5-mini');
-        await options.type('#openai-apiKey', 'sk-bad');
-        await options.type('#openai-baseUrl', s.url);
-      });
-      check(r.kind === 'error' && /Incorrect API key/.test(r.text) && /401/.test(r.text), JSON.stringify(r));
-      check(!r.text.includes('OLLAMA_ORIGINS'), 'the Ollama fix shows for OpenAI');
-      const stored = await browser2.serviceWorkerEval(`chrome.storage.local.get(null)`);
-      check(!Object.values(stored.tutorSecrets || {}).some(Boolean), `a key was stored by a test: ${JSON.stringify(stored)}`);
-    } finally {
-      s.server.close();
+  await scenario('the API key providers ask for the key and nothing else (no server address, no context window)', async () => {
+    for (const [provider, model] of [['openai', 'gpt-6.2-sol'], ['anthropic', '']]) {
+      await useProvider(options, provider, model);
+      const fields = await options.eval(`[...document.querySelectorAll('#providers input[id], #providers select[id]')].map((e) => e.id)`);
+      check(JSON.stringify(fields) === JSON.stringify([`${provider}-apiKey`]), `${provider} card fields: ${JSON.stringify(fields)}`);
     }
+    // The OpenAI models are a dropdown, as the Claude ones are.
+    await options.eval(`(() => { const p = document.getElementById('add-provider') || (document.getElementById('add-toggle').click(), document.getElementById('add-provider')); p.value = 'openai'; p.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    const names = await options.eval(`[...document.getElementById('add-model').options].map((o) => o.textContent)`);
+    check(JSON.stringify(names) === JSON.stringify(['GPT-6.2 Sol', 'GPT-6.2 Astra', 'GPT-6 Luna', 'Other (type a name)...']), `OpenAI models: ${JSON.stringify(names)}`);
+    const providers = await options.eval(`[...document.getElementById('add-provider').options].map((o) => o.textContent)`);
+    check(providers[providers.length - 1] === 'Local model', `Local model is last: ${JSON.stringify(providers)}`);
   });
 
   await scenario('an invalid Anthropic key: the provider\'s own reason', async () => {

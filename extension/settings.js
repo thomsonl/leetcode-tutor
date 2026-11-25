@@ -26,7 +26,7 @@
 
 (() => {
   const RELAY = "http://localhost:8135";
-  const ORDER = ["local", "claude", "chatgpt", "anthropic", "openai"];
+  const ORDER = ["claude", "chatgpt", "anthropic", "openai", "local"];
   const FIELD_LABELS = {
     baseUrl: "Server URL",
     model: "Model",
@@ -151,7 +151,10 @@
     if (id === "anthropic") return ANTHROPIC_ORIGIN;
     if (id !== "local" && id !== "openai") return null;
     const input = $(`${id}-baseUrl`);
-    const raw = (input && input.value.trim()) || (ext.settings.defaults[id] || {}).baseUrl;
+    // What is typed, else what is saved (an OpenAI address has no field now,
+    // but an older setup may hold one), else the provider's own address.
+    const saved = (ext.settings.providers[id] || {}).baseUrl;
+    const raw = (input && input.value.trim()) || saved || (ext.settings.defaults[id] || {}).baseUrl;
     try {
       const url = new URL(raw);
       if (url.protocol !== "http:" && url.protocol !== "https:") return null;
@@ -814,17 +817,32 @@
     return select;
   }
 
-  // The Claude subscription's models: Claude Code's own aliases, which always
-  // mean the newest of that kind, so the list never goes out of date.
-  const CLAUDE_PRESETS = [
-    ["", "Default"],
-    ["sonnet", "Sonnet (latest)"],
-    ["opus", "Opus (latest)"],
-    ["haiku", "Haiku (latest)"],
+  // The models each provider's dropdown offers (a value, its name). The
+  // Claude ones are Claude Code's own aliases, which always mean the newest
+  // of that kind, so the list never goes out of date; the OpenAI ones are
+  // exact API model IDs (shared/profiles.js names them the same way), and
+  // "Other" types any name. The Claude and ChatGPT subscriptions can also
+  // leave the choice to their own default; the API key needs a model.
+  const OPENAI_PRESETS = [
+    ["gpt-6.2-sol", "GPT-6.2 Sol"],
+    ["gpt-6.2-astra", "GPT-6.2 Astra"],
+    ["gpt-6-luna", "GPT-6 Luna"],
   ];
+  const MODEL_PRESETS = {
+    claude: [
+      ["", "Default"],
+      ["sonnet", "Sonnet (latest)"],
+      ["opus", "Opus (latest)"],
+      ["haiku", "Haiku (latest)"],
+    ],
+    chatgpt: [["", "Default"], ...OPENAI_PRESETS],
+    openai: OPENAI_PRESETS,
+  };
 
-  // A dropdown of those, keeping a name typed earlier, with "Other" to type one.
-  function presetSelect(value, attrs, flag) {
+  // A dropdown of a provider's models, keeping a name typed earlier, with
+  // "Other" to type one.
+  function presetSelect(provider, value, attrs, flag) {
+    const presets = MODEL_PRESETS[provider];
     const select = h("select", { ...attrs, onchange: () => {
       if (select.value === OTHER) {
         typeModelByHand[flag] = true;
@@ -833,9 +851,9 @@
         box.focus();
       }
     } });
-    const known = CLAUDE_PRESETS.some(([v]) => v === value);
-    for (const [v, text] of CLAUDE_PRESETS) select.appendChild(h("option", { value: v, text, selected: v === value }));
-    if (!known) select.appendChild(h("option", { value, text: value, selected: true }));
+    const known = presets.some(([v]) => v === value);
+    for (const [v, text] of presets) select.appendChild(h("option", { value: v, text, selected: v === value }));
+    if (!known && value) select.appendChild(h("option", { value, text: value, selected: true }));
     select.appendChild(h("option", { value: OTHER, text: "Other (type a name)..." }));
     return select;
   }
@@ -900,7 +918,7 @@
     // The sign-in step for the subscriptions; nothing else needs a heading.
     const needsSignIn = id === "claude" || id === "chatgpt";
     const head = needsSignIn
-      ? h("div", { class: "provider-head" }, h("div", { class: "provider-hint", text: spec.hint }), id === "chatgpt" ? h("span", { class: "tag", text: "Experimental" }) : null)
+      ? h("div", { class: "provider-head" }, h("div", { class: "provider-hint", text: spec.hint }))
       : null;
     const modelLock = isLocked(id, "model") ? lockNote("model") : null;
     const fields = h("div", { class: "fields" }, ...spec.fields.filter((f) => f !== "model").map((f) => fieldFor(id, f)), modelLock);
@@ -1104,7 +1122,7 @@
   // A Claude alias is shown by its friendly name (the dropdown's), as the
   // Tutor tab's menu shows it (shared/profiles.js keeps the same names).
   function modelName(provider, model) {
-    const preset = provider === "claude" ? CLAUDE_PRESETS.find(([v]) => v && v === model) : null;
+    const preset = (MODEL_PRESETS[provider] || []).find(([v]) => v && v === model);
     return preset ? preset[1] : model;
   }
 
@@ -1158,9 +1176,75 @@
     [draftProfiles[i], draftProfiles[j]] = [draftProfiles[j], draftProfiles[i]];
     saveSoon();
     renderProfiles();
-    const again = $(`profile-${id}-${by < 0 ? "up" : "down"}`);
-    if (again && !again.disabled) again.focus();
-    else if ($(`profile-${id}-radio`)) $(`profile-${id}-radio`).focus();
+    if ($(`profile-${id}-drag`)) $(`profile-${id}-drag`).focus();
+  }
+
+  // Dragging a row by its grip: the row follows the pointer in the list while
+  // it is held, and the new order is kept (and saved) when it is dropped.
+  // The grip also takes the arrow keys, so the order is never mouse-only.
+  function dragHandle(profile, name) {
+    const handle = iconButton(
+      `profile-${profile.id}-drag`,
+      `Move ${name}. Drag it, or press the up and down arrow keys.`,
+      ["M9 6h.01", "M15 6h.01", "M9 12h.01", "M15 12h.01", "M9 18h.01", "M15 18h.01"],
+      () => {}
+    );
+    handle.classList.add("drag-handle");
+    handle.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      e.preventDefault();
+      moveProfile(profile.id, e.key === "ArrowUp" ? -1 : 1);
+    });
+    // Only the grip starts a drag, so a rename box or a button keeps working.
+    handle.addEventListener("pointerdown", () => {
+      const row = handle.closest(".profile");
+      if (row) row.draggable = true;
+    });
+    return handle;
+  }
+
+  function initProfileDrag() {
+    const list = $("profiles");
+    let dragged = null;
+    list.addEventListener("dragstart", (e) => {
+      const row = e.target.closest ? e.target.closest(".profile") : null;
+      if (!row || !row.draggable) return;
+      dragged = row;
+      row.classList.add("dragging");
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", row.dataset.id);
+      }
+    });
+    list.addEventListener("dragover", (e) => {
+      if (!dragged) return;
+      e.preventDefault();
+      const rows = [...list.querySelectorAll(".profile:not(.dragging)")];
+      // The row under the pointer's middle line is where the dragged one goes before.
+      const after = rows.find((row) => {
+        const box = row.getBoundingClientRect();
+        return e.clientY < box.top + box.height / 2;
+      });
+      if (after) list.insertBefore(dragged, after);
+      else list.appendChild(dragged);
+    });
+    list.addEventListener("drop", (e) => {
+      if (dragged) e.preventDefault();
+    });
+    list.addEventListener("dragend", () => {
+      if (!dragged) return;
+      const row = dragged;
+      dragged = null;
+      row.classList.remove("dragging");
+      row.draggable = false;
+      const order = [...list.querySelectorAll(".profile")].map((r) => r.dataset.id);
+      const same = order.length === draftProfiles.length && order.every((id, i) => id === draftProfiles[i].id);
+      if (same) return;
+      draftProfiles = order.map((id) => draftProfiles.find((p) => p.id === id));
+      saveSoon();
+      renderProfiles();
+      if ($(`profile-${row.dataset.id}-drag`)) $(`profile-${row.dataset.id}-drag`).focus();
+    });
   }
 
   // Focus goes to the row that took the removed one's place (or the one
@@ -1264,12 +1348,11 @@
           input.focus();
           input.select();
         }),
-        iconButton(`profile-${profile.id}-up`, `Move ${name} up`, ["M18 15l-6-6-6 6"], () => moveProfile(profile.id, -1), index === 0),
-        iconButton(`profile-${profile.id}-down`, `Move ${name} down`, ["M6 9l6 6 6-6"], () => moveProfile(profile.id, 1), index === draftProfiles.length - 1),
         iconButton(`profile-${profile.id}-remove`, `Remove ${name}`, ["M18 6L6 18", "M6 6l12 12"], () => removeProfile(profile.id))
       );
     }
-    return h("div", { class: "profile", "data-default": isDefault, "data-id": profile.id }, radio, text, actions);
+    const grip = renaming === profile.id ? null : dragHandle(profile, name);
+    return h("div", { class: "profile", "data-default": isDefault, "data-id": profile.id }, grip, radio, text, actions);
   }
 
   function finishRename(id, value) {
@@ -1335,8 +1418,9 @@
     if (addProvider === "local" && !typeModelByHand.add) {
       // "Other" in this dropdown types a name here, not in the card.
       model = modelSelect("local", keepModel && (foundModels.local || []).includes(keepModel) ? keepModel : "", { id: "add-model", autocomplete: "off", spellcheck: "false" }, "add");
-    } else if (addProvider === "claude" && !typeModelByHand.add) {
-      model = presetSelect(keepModel && CLAUDE_PRESETS.some(([v]) => v === keepModel) ? keepModel : "", { id: "add-model", autocomplete: "off", spellcheck: "false" }, "add");
+    } else if (MODEL_PRESETS[addProvider] && !typeModelByHand.add) {
+      const presets = MODEL_PRESETS[addProvider];
+      model = presetSelect(addProvider, keepModel && presets.some(([v]) => v === keepModel) ? keepModel : "", { id: "add-model", autocomplete: "off", spellcheck: "false" }, "add");
     } else {
       const required = catalog[addProvider].requires.includes("model");
       model = h("input", {
@@ -2036,5 +2120,6 @@
   });
   window.addEventListener("pagehide", flushSave);
   $("test").addEventListener("click", runTest);
+  initProfileDrag();
   load();
 })();

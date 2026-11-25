@@ -102,10 +102,16 @@ export function migrateProfiles({ profiles, activeProfile, provider, model }) {
 // the newest of that kind, named as the options page's dropdown names them.
 export const CLAUDE_ALIAS_NAMES = { sonnet: 'Sonnet (latest)', opus: 'Opus (latest)', haiku: 'Haiku (latest)' };
 
-// The name of a model as people read it: the friendly name of a Claude alias,
-// otherwise the model as saved.
+// The OpenAI models the options page offers, named as it names them (an exact
+// API model ID; the page also takes any other name typed in).
+export const OPENAI_MODEL_NAMES = { 'gpt-6.2-sol': 'GPT-6.2 Sol', 'gpt-6.2-astra': 'GPT-6.2 Astra', 'gpt-6-luna': 'GPT-6 Luna' };
+
+// The name of a model as people read it: the friendly name of a Claude alias
+// or an OpenAI model, otherwise the model as saved.
 export function modelName(provider, model) {
-  if (provider === 'claude' && Object.prototype.hasOwnProperty.call(CLAUDE_ALIAS_NAMES, model)) return CLAUDE_ALIAS_NAMES[model];
+  const has = (names) => Object.prototype.hasOwnProperty.call(names, model);
+  if (provider === 'claude' && has(CLAUDE_ALIAS_NAMES)) return CLAUDE_ALIAS_NAMES[model];
+  if ((provider === 'openai' || provider === 'chatgpt') && has(OPENAI_MODEL_NAMES)) return OPENAI_MODEL_NAMES[model];
   return model;
 }
 

@@ -229,6 +229,9 @@ form[data-disabled] .card:not(#helper-card):not(#model-card):not(#advanced-card)
 .profile-meta { color: var(--muted); font-size: 13px; line-height: 18px; }
 .profile-text input[type="text"] { height: 28px; }
 .profile-actions { flex: none; display: flex; align-items: center; gap: 2px; }
+.drag-handle { cursor: grab; margin-left: -6px; touch-action: none; }
+.drag-handle:active { cursor: grabbing; }
+.profile.dragging { opacity: 0.5; border-style: dashed; }
 .iconbtn { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
 .iconbtn:hover:not(:disabled) { background: var(--fill); color: var(--text); }
 .iconbtn:disabled { opacity: 0.35; cursor: not-allowed; }

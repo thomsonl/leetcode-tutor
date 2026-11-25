@@ -35,7 +35,9 @@ export const PROVIDERS = {
   openai: {
     label: 'OpenAI API key',
     hint: 'Pay-as-you-go with a key from platform.openai.com.',
-    fields: ['apiKey', 'model', 'baseUrl'],
+    // The OpenAI server address is not a field: any OpenAI-compatible server
+    // (a proxy, a gateway) is set up as a Local model, which has one.
+    fields: ['apiKey', 'model'],
     requires: ['apiKey', 'model'],
     runtimes: ['extension', 'helper'],
   },

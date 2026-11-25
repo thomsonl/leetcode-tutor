@@ -302,7 +302,7 @@ await scenario('a refused save shows the reason, marks the offending field and l
 
 await scenario('a failing connection test is reported as an error, not as success', companion({ testResult: { ok: false, message: 'ChatGPT sign-in: not logged in. Run "codex login".' } }), async (page) => {
   await useProvider(page, 'chatgpt');
-  assert.match(await text(page, '#providers'), /Experimental/);
+  assert.doesNotMatch(await text(page, '#providers'), /Experimental/);
   await page.click('#test');
   await page.waitFor(`document.getElementById('test-result').textContent.includes('codex login')`);
   assert.equal(await page.eval(`document.getElementById('test-result').getAttribute('data-kind')`), 'error');
@@ -618,6 +618,8 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
     assert.match(await text(page, '#profiles-note'), /already in the list/);
     // A model a provider needs must be chosen.
     await page.eval(`(() => { const s = document.getElementById('add-provider'); s.value = 'openai'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    // The dropdown starts on a model; "Other" left empty is what leaves none chosen.
+    await page.eval(`(() => { const s = document.getElementById('add-model'); s.value = '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
     await page.click('#add-profile-button');
     assert.match(await text(page, '#profiles-note'), /Choose a model for OpenAI API key/);
     await page.eval(`(() => { const s = document.getElementById('add-provider'); s.value = 'anthropic'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
@@ -647,8 +649,31 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
     await keyOn(page, `#profile-${qwen}-label`, 'Escape');
     // Reorder, remove.
     const gemma = rows[1].id;
-    assert.equal(await page.eval(`document.getElementById('profile-${qwen}-up').disabled`), true, 'the first cannot move up');
-    await page.click(`#profile-${gemma}-up`);
+    // The grip takes the arrow keys (the first cannot move up).
+    await keyOn(page, `#profile-${qwen}-drag`, 'ArrowUp');
+    assert.deepEqual((await profileRows(page)).map((r) => r.name), ['Qwen', 'Gemma'], 'the first row stays first');
+    await keyOn(page, `#profile-${gemma}-drag`, 'ArrowUp');
+    rows = await profileRows(page);
+    assert.deepEqual(rows.map((r) => r.name), ['Gemma', 'Qwen']);
+    assert.equal(await focusedId(page), `profile-${gemma}-drag`, 'focus stays on the grip');
+    // Dragging the grip of the last row above the first one reorders and saves.
+    await page.eval(`(() => {
+      const handle = document.getElementById('profile-${qwen}-drag');
+      handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      const row = handle.closest('.profile');
+      const dt = new DataTransfer();
+      row.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+      const list = document.getElementById('profiles');
+      const first = list.querySelector('.profile:not(.dragging)').getBoundingClientRect();
+      list.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, clientY: first.top + 2, dataTransfer: dt }));
+      row.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    })()`);
+    assert.deepEqual((await profileRows(page)).map((r) => r.name), ['Qwen', 'Gemma'], 'a drag moves the row');
+    assert.equal(await page.eval(`document.querySelector('.profile.dragging')`), null, 'nothing is left looking dragged');
+    await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the drag saved', timeout: 20000 });
+    const dragged = await browser.serviceWorkerEval(`chrome.storage.local.get(null)`);
+    assert.deepEqual(dragged.tutorSettings.profiles.map((p) => p.label), ['Qwen', 'Gemma'], 'the new order is what is saved');
+    await keyOn(page, `#profile-${gemma}-drag`, 'ArrowUp');
     rows = await profileRows(page);
     assert.deepEqual(rows.map((r) => r.name), ['Gemma', 'Qwen']);
     await page.screenshot(path.join(shots, 'models-card-dark.png'), { scheme: 'dark' });
