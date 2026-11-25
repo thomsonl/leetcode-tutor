@@ -1313,7 +1313,10 @@
     button.model[hidden] { display: none; }
     button.model:hover:not(:disabled), button.model[aria-expanded="true"] { color: var(--fg); background: var(--fill); }
     button.model:focus-visible { outline: 1px solid color-mix(in srgb, var(--fg) 45%, transparent); outline-offset: 0; }
-    .provider { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* The vertical padding (undone by the margin) gives the clipped text room above
+       and below the line box, so a short line height from the page's own select
+       styling never shaves the tops and tails off the letters. */
+    .provider { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 0; margin: -4px 0; }
     button.model svg { flex: none; }
     /* The Tutor | Interviewer switch: two toggle buttons in one small outlined
        group, the chosen one filled. It never shrinks (the status and the model
@@ -1324,6 +1327,9 @@
     .mode-thumb[data-ready] { opacity: 1; transition: left 0.5s cubic-bezier(0.4, 0, 0.2, 1), width 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
     button.mode-opt { position: relative; z-index: 1; flex: none; width: auto; height: 16px; padding: 0 8px; border-radius: 4px; color: var(--muted); font: 500 12px / 16px var(--font); white-space: nowrap; cursor: pointer; transition: color 0.5s ease; }
     button.mode-opt[aria-pressed="true"] { color: var(--fg); cursor: default; }
+    /* The filled highlight marks the current mode, so hovering must not paint one
+       (it would otherwise take the panel's general button:hover fill). */
+    button.mode-opt:hover:not(:disabled) { background: transparent; }
     @media (prefers-reduced-motion: reduce) { .mode-thumb[data-ready], button.mode-opt { transition: none; } }
     button.mode-opt:disabled:not([aria-pressed="true"]) { opacity: 0.55; cursor: progress; }
     button.mode-opt:focus-visible { outline: 1px solid color-mix(in srgb, var(--fg) 45%, transparent); outline-offset: 0; }

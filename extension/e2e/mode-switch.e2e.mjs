@@ -163,6 +163,17 @@ try {
     const thumb = () => page.eval(`(() => { const t = window.__q('.mode-thumb'); const b = window.__qa('.mode-opt')[1]; return { left: parseFloat(getComputedStyle(t).left), target: b.offsetLeft, ready: t.hasAttribute('data-ready') }; })()`);
     check((await thumb()).ready, 'the highlight is set up to animate');
     const fit = await page.eval(`(() => window.__qa('.mode-opt').map((b) => { const r = document.createRange(); r.selectNodeContents(b); const t = r.getBoundingClientRect(); const bb = b.getBoundingClientRect(); return { text: b.textContent, textTop: t.top - bb.top, textBottom: bb.bottom - t.bottom, textLeft: t.left - bb.left, textRight: bb.right - t.right, scroll: [b.scrollWidth - b.clientWidth, b.scrollHeight - b.clientHeight] }; }))()`);
+    // The model name is clipped to one line; a short line height (the page's own select styling can
+    // give one) must still leave room for the whole glyphs.
+    const nameFit = await page.eval(`(() => { const btn = window.__q('button.model'); btn.style.setProperty('--sel-line', '12px'); const p = window.__q('.provider'); const r = document.createRange(); r.selectNodeContents(p); const t = r.getBoundingClientRect(); const b = p.getBoundingClientRect(); return { top: t.top - b.top, bottom: b.bottom - t.bottom, text: p.textContent }; })()`);
+    check(nameFit.top >= 0 && nameFit.bottom >= 0, `the model name is clipped: ${JSON.stringify(nameFit)}`);
+    // Hovering an option must not highlight it: the filled thumb alone marks the current mode.
+    const hovered = await page.eval(`(() => { const b = window.__qa('.mode-opt')[0]; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hovered.x, y: hovered.y });
+    await wait(150);
+    const bg = await page.eval(`getComputedStyle(window.__qa('.mode-opt')[0]).backgroundColor`);
+    check(bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent', `hovering a mode option paints a background: ${bg}`);
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
     check(fit.every((f) => f.textTop >= 0 && f.textBottom >= 0 && f.textLeft >= 0 && f.textRight >= 0 && f.scroll[0] <= 0 && f.scroll[1] <= 0), `a mode label is clipped: ${JSON.stringify(fit)}`);
     await page.waitFor(`(() => { const t = window.__q('.mode-thumb'); return Math.abs(parseFloat(getComputedStyle(t).left) - window.__qa('.mode-opt')[1].offsetLeft) < 0.5; })()`, { what: 'the highlight under Interviewer', timeout: 3000 });
     await page.waitFor(`window.__feed().length === 1 && window.__feed()[0].startsWith('empty:')`, { what: 'the empty feed' });
