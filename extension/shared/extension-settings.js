@@ -23,6 +23,7 @@ import { PROVIDERS, OLLAMA_BASE_URL, OPENAI_BASE_URL, defaultRuntime } from './p
 import { LocalBackend } from './local-backend.js';
 import { DEFAULT_PROMPTS, FIXED_RULES, MAX_PROMPT_CHARS, MODES, PromptError, normalizeMode, normalizePrompts, systemMessageFor } from './tutor-prompt.js';
 import { AnthropicBackend, ANTHROPIC_BASE_URL, DEFAULT_ANTHROPIC_MODEL } from './anthropic-backend.js';
+import { createOpenAIResolver } from './model-aliases.js';
 import { ProfileError, cleanActiveProfile, cleanProfiles, findProfile, migrateProfiles, profileName } from './profiles.js';
 
 export const EXTENSION_SETTINGS_VERSION = 2;
@@ -365,6 +366,9 @@ export function backendKey(settings, secrets) {
 
 // Builds the backend for the chosen provider. Throws SettingsError when it
 // cannot be built from these settings.
+// One for the worker's life, so the model list is asked for at most once an hour.
+const resolveOpenAI = createOpenAIResolver();
+
 export function buildBackend(settings, secrets, { probe } = {}) {
   const id = settings.provider;
   const problem = missingRequirement(settings, secrets);
@@ -387,6 +391,8 @@ export function buildBackend(settings, secrets, { probe } = {}) {
       numCtx: id === 'openai' ? OPENAI_CONTEXT_TOKENS : fields.contextTokens || DEFAULT_LOCAL_CONTEXT_TOKENS,
       windowSetting: WINDOW_SETTING,
       systemMessage,
+      // "luna" and the like mean the newest of that family at the time of each request.
+      ...(id === 'openai' ? { modelResolver: (model) => resolveOpenAI(model, { baseUrl: fields.baseUrl || DEFAULT_FIELDS[id].baseUrl, apiKey: secrets[id] }) } : {}),
       ...(probe ? { probe } : {}),
     });
   }

@@ -842,23 +842,22 @@
     return select;
   }
 
-  // The models each provider's dropdown offers (a value, its name). The
-  // Claude ones are Claude Code's own aliases, which always mean the newest
-  // of that kind, so the list never goes out of date; the OpenAI ones are
-  // exact API model IDs (shared/profiles.js names them the same way), and
-  // "Other" types any name. The Claude and ChatGPT subscriptions can also
+  // The models each provider's dropdown offers (a value, its name). Each is
+  // a family, not a version, and the newest of it is what runs: the Claude
+  // ones are Claude Code's own aliases, and the OpenAI ones are resolved when
+  // used (shared/model-aliases.js). "Other" types an exact model name. The Claude and ChatGPT subscriptions can also
   // leave the choice to their own default; the API key needs a model.
   const OPENAI_PRESETS = [
-    ["gpt-6.2-sol", "GPT-6.2 Sol"],
-    ["gpt-6.2-astra", "GPT-6.2 Astra"],
-    ["gpt-6-luna", "GPT-6 Luna"],
+    ["sol", "Sol"],
+    ["astra", "Astra"],
+    ["luna", "Luna"],
   ];
   const MODEL_PRESETS = {
     claude: [
       ["", "Default"],
-      ["sonnet", "Sonnet (latest)"],
-      ["opus", "Opus (latest)"],
-      ["haiku", "Haiku (latest)"],
+      ["sonnet", "Sonnet"],
+      ["opus", "Opus"],
+      ["haiku", "Haiku"],
     ],
     chatgpt: [["", "Default"], ...OPENAI_PRESETS],
     openai: OPENAI_PRESETS,

@@ -580,7 +580,7 @@ try {
     await options3.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the choice saved by itself', timeout: 30000 });
     check(await options3.eval(`document.getElementById('wait-note').hidden`), 'the wait note and the saved note showed together');
     // The carried model is in the list once the helper answers.
-    await options3.waitFor(hasRow('Opus (latest)'), { what: 'the carried model', timeout: 15000 });
+    await options3.waitFor(hasRow('Opus'), { what: 'the carried model', timeout: 15000 });
     const stored = await options3.eval(`chrome.storage.local.get(null)`);
     check(!stored.settingsResume, `resume record left: ${JSON.stringify(stored.settingsResume)}`);
     check(!stored.nativeReload, `reload guard left: ${JSON.stringify(stored.nativeReload)}`);
@@ -597,7 +597,7 @@ try {
   await scenario('only the options page behind: it reloads itself and keeps the choice', async () => {
     await options3.eval(`(() => { window.__before = 1; delete chrome.runtime.connectNative; })()`);
     await addModel(options3, 'claude', 'haiku');
-    await options3.waitFor(`window.__before === undefined && document.readyState === 'complete' && ${hasRow('Haiku (latest)')}`, { what: 'the page to reload with the choice', timeout: 15000 });
+    await options3.waitFor(`window.__before === undefined && document.readyState === 'complete' && ${hasRow('Haiku')}`, { what: 'the page to reload with the choice', timeout: 15000 });
     await options3.waitFor(`document.getElementById('helper-state-text').textContent === 'Running'`, { what: 'Running', timeout: 15000 });
   });
 

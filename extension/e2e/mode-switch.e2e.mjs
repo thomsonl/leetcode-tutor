@@ -156,6 +156,41 @@ try {
     check(!systemOf(model.requests[0]).includes('technical interviewer'), 'and the interviewer prompt is not');
   });
 
+  // Zoomed screenshots of the switch in each state, to see hover, the slide and the result.
+  const modeShot = async (name) => {
+    const r = await page.eval(`(() => { const b = window.__q('.mode').getBoundingClientRect(); return { x: Math.max(0, b.left - 8), y: Math.max(0, b.top - 8), width: b.width + 150, height: b.height + 16 }; })()`);
+    const { data } = await page.send('Page.captureScreenshot', { format: 'png', clip: { ...r, scale: 4 } });
+    fs.writeFileSync(path.join(shots, name), Buffer.from(data, 'base64'));
+  };
+  const hoverOpt = async (i) => {
+    const c = await page.eval(`(() => { const r = window.__qa('.mode-opt')[${i}].getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: c.x, y: c.y });
+    await wait(700);
+  };
+  await scenario('screenshots of the switch: resting, hovering each option, mid-slide, and after', async () => {
+    await page.send('Page.bringToFront');
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 });
+    await wait(700);
+    await modeShot('mode-1-resting-tutor.png');
+    await hoverOpt(1);
+    await modeShot('mode-2-hover-interviewer-while-tutor-is-current.png');
+    await hoverOpt(0);
+    await modeShot('mode-3-hover-tutor-current.png');
+    await page.eval(`window.__qa('.mode-opt')[1].click()`);
+    await wait(180);
+    await modeShot('mode-4-mid-slide.png');
+    await wait(900);
+    await modeShot('mode-5-after-slide-pointer-still-on-interviewer.png');
+    await hoverOpt(0);
+    await modeShot('mode-6-hover-tutor-while-interviewer-is-current.png');
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 });
+    await wait(700);
+    await modeShot('mode-7-resting-interviewer.png');
+    await page.eval(`window.__qa('.mode-opt')[0].click()`);
+    await wait(1200);
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 });
+  });
+
   await scenario('choosing Interviewer clears the chat at once, and the notice shows with the next message', async () => {
     await page.eval(`window.__qa('.mode-opt')[1].click()`);
     await page.waitFor(`window.__mode() === 'Tutor Interviewer*'`, { what: 'Interviewer chosen' });

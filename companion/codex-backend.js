@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { buildMessages } from '../extension/shared/context-budget.js';
+import { resolveKnown } from '../extension/shared/model-aliases.js';
 import { formatPinnedCode } from '../extension/shared/code-ledger.js';
 import { flattenMessages, normalizeConversation } from '../extension/shared/conversation.js';
 import { SUMMARY_MAX_TOKENS, SUMMARY_TIMEOUT_MS, condense, condenseCount, summaryBodyChars } from '../extension/shared/context-summary.js';
@@ -90,7 +91,8 @@ export function codexSubscriptionEnv(env = process.env, options = {}) {
 
 export function buildCodexArgs({ model, cwd }) {
   const args = ['exec', '--json', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only', '-C', cwd];
-  if (model) args.push('-m', model);
+  // A family name ("luna") means the newest known model of it; a typed name stays.
+  if (model) args.push('-m', resolveKnown(model));
   args.push('-'); // read the prompt from stdin
   return args;
 }

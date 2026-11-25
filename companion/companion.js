@@ -75,6 +75,7 @@ import {
 import { createSettingsRpc } from './settings-rpc.js';
 import { isSignInError, isSignInText, signInError } from './sign-in.js';
 import { CodexBackend } from './codex-backend.js';
+import { createOpenAIResolver } from '../extension/shared/model-aliases.js';
 import { transferConversation } from '../extension/shared/conversation.js';
 import { createReplyGuard, guardedSend } from '../extension/shared/reply-guard.js';
 import { requestCaptureTrim, pendingTrimFor, pendingTrimHappened, isPendingTrim } from './capture-log.js';
@@ -440,6 +441,9 @@ class ClaudeBackend {
 // resolveEffective). Throws, with a message fit for the options page, when
 // one cannot be built from it. Used at startup and by every options-page
 // save or connection test (settings-rpc.js), so all of them agree.
+// One for the process's life, so the OpenAI model list is asked for at most once an hour.
+const resolveOpenAI = createOpenAIResolver();
+
 function makeBackend(config) {
   const { provider } = config;
   // The mode's instructions: the student's own or the default (tutor-prompt.js).
@@ -461,6 +465,8 @@ function makeBackend(config) {
       numCtx: config.contextTokens || DEFAULT_LOCAL_NUM_CTX,
       reserveTokens: LOCAL_RESERVE_TOKENS,
       systemMessage,
+      // "luna" and the like mean the newest of that family at the time of each request.
+      ...(provider === 'openai' ? { modelResolver: (model) => resolveOpenAI(model, { baseUrl: config.baseUrl || DEFAULT_BASE_URL, apiKey: config.apiKey }) } : {}),
     });
   }
   if (provider === 'chatgpt') {

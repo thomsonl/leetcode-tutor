@@ -14,6 +14,8 @@
 //
 // Pure JavaScript with no Node API (extension/shared.test.js checks that).
 
+import { OPENAI_FAMILY_NAMES, canonicalModel } from './model-aliases.js';
+
 export const PROFILE_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const MAX_PROFILES = 30;
 export const MAX_PROFILE_LABEL = 60;
@@ -37,7 +39,8 @@ export function cleanProfile(raw, providers) {
   if (!raw || typeof raw !== 'object') return null;
   if (typeof raw.id !== 'string' || !PROFILE_ID_RE.test(raw.id)) return null;
   if (typeof raw.provider !== 'string' || !Object.prototype.hasOwnProperty.call(providers, raw.provider)) return null;
-  const model = cleanText(raw.model, 200);
+  const typed = cleanText(raw.model, 200);
+  const model = typed ? canonicalModel(raw.provider, typed) : typed;
   const label = cleanText(raw.label, MAX_PROFILE_LABEL);
   if (model === undefined || label === undefined) return null;
   return { id: raw.id, provider: raw.provider, model, label };
@@ -100,11 +103,11 @@ export function migrateProfiles({ profiles, activeProfile, provider, model }) {
 
 // The Claude subscription's models are Claude Code aliases that always mean
 // the newest of that kind, named as the options page's dropdown names them.
-export const CLAUDE_ALIAS_NAMES = { sonnet: 'Sonnet (latest)', opus: 'Opus (latest)', haiku: 'Haiku (latest)' };
+export const CLAUDE_ALIAS_NAMES = { sonnet: 'Sonnet', opus: 'Opus', haiku: 'Haiku' };
 
-// The OpenAI models the options page offers, named as it names them (an exact
-// API model ID; the page also takes any other name typed in).
-export const OPENAI_MODEL_NAMES = { 'gpt-6.2-sol': 'GPT-6.2 Sol', 'gpt-6.2-astra': 'GPT-6.2 Astra', 'gpt-6-luna': 'GPT-6 Luna' };
+// The OpenAI models are named by family (model-aliases.js): the newest of each
+// is what runs.
+export const OPENAI_MODEL_NAMES = OPENAI_FAMILY_NAMES;
 
 // The name of a model as people read it: the friendly name of a Claude alias
 // or an OpenAI model, otherwise the model as saved.

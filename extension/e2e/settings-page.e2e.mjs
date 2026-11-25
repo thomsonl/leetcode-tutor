@@ -735,7 +735,7 @@ await scenario('models card: subscription models are kept by the helper too, and
   assert.deepEqual(rows.map((r) => [r.name, r.isDefault]), [['claude-haiku-5-5', true]], 'the old setting is one default model');
   await openAdd(page);
   await page.eval(`(() => { const s = document.getElementById('add-provider'); s.value = 'claude'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-  assert.deepEqual(await page.eval(`[...document.getElementById('add-model').options].map((o) => o.textContent)`), ['Default', 'Sonnet (latest)', 'Opus (latest)', 'Haiku (latest)', 'Other (type a name)...'], 'the Claude subscription offers its models in a dropdown');
+  assert.deepEqual(await page.eval(`[...document.getElementById('add-model').options].map((o) => o.textContent)`), ['Default', 'Sonnet', 'Opus', 'Haiku', 'Other (type a name)...'], 'the Claude subscription offers its models in a dropdown');
   await page.eval(`(() => { const s = document.getElementById('add-model'); s.value = 'sonnet'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await page.type('#add-label', 'Sonnet');
   await page.click('#add-profile-button');
@@ -747,7 +747,7 @@ await scenario('models card: subscription models are kept by the helper too, and
   await page.click('#add-profile-button');
   rows = await profileRows(page);
   assert.deepEqual(rows.map((r) => r.name), ['claude-haiku-5-5', 'Sonnet', 'llama3.2']);
-  assert.equal(rows[1].meta, 'Claude subscription · Sonnet (latest)');
+  assert.equal(rows[1].meta, 'Claude subscription', 'the model name is not repeated when it is the row name');
   assert.equal(rows[2].meta, 'Local model');
   // The adds saved themselves (two quick ones in one save) and the last one,
   // the browser model, became the default; the helper is told only its own list.
@@ -764,8 +764,8 @@ await scenario('the Claude subscription: a saved alias is shown by its friendly 
   stored: applyPatch(emptySettings(), { provider: 'claude', providers: { claude: { model: 'opus' } } }),
 }), async (page) => {
   assert.equal(await page.eval(`document.getElementById('claude-model')`), null, 'the rows are where a model is chosen');
-  assert.equal(await text(page, '#connection-text'), 'Tutor running: Claude subscription, Opus (latest)', 'the header names the alias as the add dropdown does');
-  assert.equal((await profileRows(page))[0].name, 'Opus (latest)');
+  assert.equal(await text(page, '#connection-text'), 'Tutor running: Claude subscription, Opus', 'the header names the alias as the add dropdown does');
+  assert.equal((await profileRows(page))[0].name, 'Opus');
   await page.screenshot(path.join(shots, 'claude-model-dark.png'), { scheme: 'dark' });
 });
 

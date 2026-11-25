@@ -238,7 +238,12 @@ test("saved model profiles: bad entries are dropped on load and refused on save,
   assert.equal(profileName({ id: "c", provider: "claude", model: null, label: "Fast" }, PROVIDERS), "Fast");
   assert.equal(profileName({ id: "c", provider: "claude", model: null, label: null }, PROVIDERS), "Claude subscription");
   // A Claude alias is named as the options page's dropdown names it; any other model as saved.
-  assert.equal(profileName({ id: "c", provider: "claude", model: "sonnet", label: null }, PROVIDERS), "Sonnet (latest)");
+  assert.equal(profileName({ id: "c", provider: "claude", model: "sonnet", label: null }, PROVIDERS), "Sonnet");
+  // The ChatGPT subscription and the OpenAI key name their models plainly.
+  assert.equal(profileName({ id: "g", provider: "chatgpt", model: "luna", label: null }, PROVIDERS), "Luna");
+  assert.equal(profileName({ id: "o", provider: "openai", model: "sol", label: null }, PROVIDERS), "Sol");
+  assert.equal(profileName({ id: "o2", provider: "openai", model: "astra", label: null }, PROVIDERS), "Astra");
+  assert.equal(profileName({ id: "o3", provider: "openai", model: "some-other-model", label: null }, PROVIDERS), "some-other-model");
   assert.equal(profileName({ id: "c", provider: "claude", model: "claude-haiku-5-5", label: null }, PROVIDERS), "claude-haiku-5-5");
   assert.equal(profileName({ id: "c", provider: "local", model: "sonnet", label: null }, PROVIDERS), "sonnet");
   assert.deepEqual(migrateProfiles({ provider: null }), { profiles: [], activeProfile: null });
