@@ -22,7 +22,7 @@
 
 import { createTutorService, SETTINGS_KEY } from "./shared/tutor-service.js";
 import { normalizeSettings } from "./shared/extension-settings.js";
-import { createHelperLauncher } from "./shared/helper-launcher.js";
+import { createHelperLauncher, HELPER_HOST_NAME } from "./shared/helper-launcher.js";
 import { MIN_HELPER_VERSION, helperTooOld } from "./shared/helper-version.js";
 import { createExtensionUpdater } from "./shared/extension-update.js";
 import { createSolvedService } from "./shared/solved.js";
@@ -227,8 +227,40 @@ async function helperProblem(current) {
     granted = false;
   }
   if (!granted || typeof api.runtime.connectNative !== "function") return "Helper app not set up yet";
-  if (launcher.view().state === "not-installed") return "Helper app not installed";
+  if (launcher.view().state === "not-installed") {
+    // That state sticks until something asks again (the helper may have been
+    // installed since), so look for the host before saying it is missing.
+    if (!(await hostAnswers())) return "Helper app not installed";
+    launcher.retry();
+  }
   return null;
+}
+
+// Whether the browser can start the helper's host right now: a connection
+// that is not refused straight away. Closed again at once.
+function hostAnswers() {
+  return new Promise((resolve) => {
+    let port = null;
+    try {
+      port = api.runtime.connectNative(HELPER_HOST_NAME);
+    } catch {
+      resolve(false);
+      return;
+    }
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      try {
+        port.disconnect();
+      } catch {
+        // already closed
+      }
+      resolve(ok);
+    };
+    port.onDisconnect.addListener(() => finish(false));
+    setTimeout(() => finish(true), 500);
+  });
 }
 
 const service = createTutorService({

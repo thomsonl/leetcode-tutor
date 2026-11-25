@@ -377,7 +377,9 @@
     return record;
   }
 
-  // What to show: [light ("ok" | "bad" | null), label].
+  // What to show: [light ("ok" | "warn" | "bad" | null), label]. A running
+  // helper is red when it is too old for this extension (it will not work),
+  // yellow when it works but a newer version is out, green otherwise.
   function helperSummary() {
     if (!helperInfo) return [null, "Checking"];
     if (!helperInfo.permission) return [null, "Not allowed yet"];
@@ -387,6 +389,8 @@
     if (helperInfo.state === "running") {
       const host = helperInfo.host || {};
       if (host.error) return ["bad", "Error"];
+      if (helperInfo.helperOld) return ["bad", "Update needed"];
+      if (host.update && host.update.newer) return ["warn", "Update available"];
       if (host.relay && host.relay.state === "external") return ["ok", "Running (started by hand)"];
       return ["ok", "Running"];
     }
@@ -471,14 +475,35 @@
     return box;
   }
 
+  // A local model needs nothing set up when it runs through the helper, but in
+  // the browser Ollama refuses it until OLLAMA_ORIGINS trusts the extension.
+  // So with a working helper installed the local model uses it, and without one
+  // it runs in the browser; the student is not asked. Only evidence either way
+  // changes it (an unknown state leaves the choice as it is).
+  function followHelperForLocal() {
+    if (!catalog || !catalog.local || runtimesOf("local").length < 2 || !helperInfo) return;
+    const usable = helperInfo.permission && !helperInfo.helperOld && (helperInfo.state === "running" || helperProbe === "installed");
+    const absent = !helperInfo.permission || helperInfo.state === "not-installed" || helperProbe === "not-installed";
+    const next = usable ? "helper" : absent ? "extension" : null;
+    if (!next || runtimeChoice.local === next) return;
+    runtimeChoice.local = next;
+    if (selected !== "local") return;
+    render();
+    clearResults();
+    if (next === "helper" && !helper) loadHelper();
+    // A saved local model moves to its new home with the next save.
+    if (draftProfiles.some((p) => p.provider === "local")) saveSoon();
+  }
+
   function drawHelper() {
     const card = $("helper-card");
     if (card.hidden) return;
+    followHelperForLocal();
     const [light, label] = helperSummary();
     const state = $("helper-state");
     if (light === "ok") state.setAttribute("data-ok", "");
     else state.removeAttribute("data-ok");
-    if (light === "bad") state.setAttribute("data-state", "bad");
+    if (light === "bad" || light === "warn") state.setAttribute("data-state", light);
     else state.removeAttribute("data-state");
     $("helper-state-text").textContent = label;
 

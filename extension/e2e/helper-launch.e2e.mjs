@@ -199,7 +199,7 @@ async function showPanel(page) {
 }
 
 // ---- 2. granted: not installed, then installed ----------------------------
-const copy = extensionCopy(extensionDir, { extraPermissions: ['nativeMessaging'], extraHosts: [`http://localhost:${relayPort}/*`, 'http://localhost/*'] });
+const copy = extensionCopy(extensionDir, { extraPermissions: ['nativeMessaging'], extraHosts: [`http://localhost:${relayPort}/*`, 'http://localhost/*', 'https://api.anthropic.com/*'] });
 // Requests a content script makes do not pass through the page's CDP Fetch
 // interception, so the copy's relay address itself points at the test port.
 for (const file of ['panel.js', 'content.js', 'settings.js']) {
@@ -275,6 +275,42 @@ try {
     await options.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the save', timeout: 15000 });
   });
 
+  await scenario('a local model runs through the installed helper, so Ollama needs no OLLAMA_ORIGINS', async () => {
+    await pickModel(options, 'local', 'Local model', 'llama3.2');
+    await options.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the local model saved', timeout: 20000 });
+    const view = await options.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:helper-status' })`);
+    check(view.runtime === 'helper', `runtime: ${view.runtime}`);
+    // Back to Claude for what follows.
+    await pickModel(options, 'claude', 'Claude subscription');
+    await options.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'Claude saved again', timeout: 20000 });
+  });
+
+  await scenario('the Helper light: red when too old to work, yellow when it works but an update is out, green otherwise', async () => {
+    // The status the page gets is changed in the page, since the real helper is current.
+    await options.eval(`(() => {
+      const orig = chrome.runtime.sendMessage.bind(chrome.runtime);
+      chrome.runtime.sendMessage = async (m, ...rest) => {
+        const res = await orig(m, ...rest);
+        if (window.__helperTweak && m && m.type === 'lc-tutor:helper-status' && res) return window.__helperTweak(structuredClone(res));
+        return res;
+      };
+    })()`);
+    const light = () => options.eval(`({ text: document.getElementById('helper-state-text').textContent, state: document.getElementById('helper-state').getAttribute('data-state'), ok: document.getElementById('helper-state').hasAttribute('data-ok') })`);
+    const show = async (tweak, text) => {
+      await options.eval(`window.__helperTweak = ${tweak}`);
+      await options.waitFor(`document.getElementById('helper-state-text').textContent === ${JSON.stringify(text)}`, { what: text, timeout: 15000 });
+      return light();
+    };
+    let l = await show(`(r) => { r.helperOld = true; return r; }`, 'Update needed');
+    check(l.state === 'bad' && !l.ok, `too old: ${JSON.stringify(l)}`);
+    await options.screenshot(path.join(shots, 'helper-light-red.png'), { width: 900, height: 1100 });
+    l = await show(`(r) => { r.helperOld = false; r.host.update = { current: r.host.version, latest: '9.9.9', newer: true, auto: true }; return r; }`, 'Update available');
+    check(l.state === 'warn' && !l.ok, `update out: ${JSON.stringify(l)}`);
+    await options.screenshot(path.join(shots, 'helper-light-yellow.png'), { width: 900, height: 1100 });
+    l = await show(`null`, 'Running');
+    check(l.state === null && l.ok, `current: ${JSON.stringify(l)}`);
+  });
+
   await scenario('the Helper section shows the helper\'s version and the automatic update switch, which the helper remembers', async () => {
     const where = layout({ platform: 'linux', home, env: {} });
     const configFile = path.join(where.appDir, 'helper-config.json');
@@ -299,12 +335,12 @@ try {
     await page.send('Page.close');
     page = null;
     // The options page holds the helper while its form shows a provider that
-    // runs through it, so the form leaves that provider first. The browser's
-    // permission prompt for a local server is refused here, so the choice stays
-    // in the form unsaved (a saved local model would end the helper's work at once).
-    await options.eval(`chrome.permissions.request = () => Promise.resolve(false)`);
-    await pickModel(options, 'local', 'Local model', 'llama3.2');
-    await options.waitFor(`document.getElementById('save-result').textContent.startsWith('Not saved')`, { what: 'the refused local model', timeout: 10000 });
+    // runs through it, so the form leaves that provider first. An API key
+    // provider runs in the browser; with no key typed the choice stays in the
+    // form unsaved (a saved one would end the helper's work at once). (A local
+    // model is not used for this: with the helper installed it runs through it.)
+    await pickModel(options, 'anthropic', 'Anthropic API key');
+    await options.waitFor(`/Enter the Anthropic API key/.test(document.getElementById('save-result').textContent)`, { what: 'the note that the key is missing', timeout: 10000 });
     await sleep(3000);
     const view = await options.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:helper-status' })`);
     check(view.tabs === 0 && view.state === 'running', `right after closing: ${JSON.stringify(view)}`);
@@ -368,12 +404,14 @@ try {
     await second.waitFor(formReady, { what: 'the form to be ready', timeout: 15000 });
   });
 
-  await scenario('switching the form back to the local model lets the helper stop', async () => {
+  await scenario('switching to a model that runs in the browser lets the helper stop', async () => {
     const pids = await helperPids(second);
-    await pickModel(second, 'local', 'Local model', 'llama3.2');
+    await pickModel(second, 'anthropic', 'Anthropic API key');
+    await second.type('#anthropic-apiKey', 'sk-ant-test-key-0000');
+    await second.eval(`document.getElementById('anthropic-apiKey').dispatchEvent(new Event('change', { bubbles: true }))`);
     const deadline = Date.now() + 40000;
     while (Date.now() < deadline && pids.some(isAlive)) await sleep(250);
-    check(!pids.some(isAlive), `the helper still runs for a local model user: ${JSON.stringify(await second.eval(`({ card: document.getElementById('helper-card').hidden, ext: (document.getElementById('local-runtime-extension') || {}).checked, help: (document.getElementById('local-runtime-helper') || {}).checked })`))} ${JSON.stringify(await second.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:helper-status' })`))}`);
+    check(!pids.some(isAlive), `the helper still runs for a browser-model user: ${JSON.stringify(await second.eval(`({ card: document.getElementById('helper-card').hidden, ext: (document.getElementById('local-runtime-extension') || {}).checked, help: (document.getElementById('local-runtime-helper') || {}).checked })`))} ${JSON.stringify(await second.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:helper-status' })`))}`);
     const view = await second.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:helper-status' })`);
     check(view.runtime === 'extension', `runtime: ${view.runtime}`);
   });

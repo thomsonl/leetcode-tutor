@@ -1323,7 +1323,6 @@
     .mode-thumb { position: absolute; left: 0; top: 0; width: 0; height: 0; border-radius: 4px; background: var(--fill); pointer-events: none; opacity: 0; }
     .mode-thumb[data-ready] { opacity: 1; transition: left 0.5s cubic-bezier(0.4, 0, 0.2, 1), width 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
     button.mode-opt { position: relative; z-index: 1; flex: none; width: auto; height: 16px; padding: 0 8px; border-radius: 4px; color: var(--muted); font: 500 12px / 16px var(--font); white-space: nowrap; cursor: pointer; transition: color 0.5s ease; }
-    button.mode-opt:hover:not(:disabled):not([aria-pressed="true"]) { color: var(--fg); }
     button.mode-opt[aria-pressed="true"] { color: var(--fg); cursor: default; }
     @media (prefers-reduced-motion: reduce) { .mode-thumb[data-ready], button.mode-opt { transition: none; } }
     button.mode-opt:disabled:not([aria-pressed="true"]) { opacity: 0.55; cursor: progress; }
