@@ -1014,11 +1014,25 @@
     return wrap;
   }
 
+  // How the Progress bars are filled: by difficulty (the default) or all green.
+  // Kept in the browser's storage for the Progress view to read, not in the
+  // tutor settings, so it is saved at once here.
+  const BAR_STYLE_KEY = "progressBarStyle";
+  let barByDifficulty = true;
+
   function renderBehavior() {
     const inBrowser = runtimeOf(selected) === "extension";
     const o = inBrowser ? ext.settings.options : helper ? helper.settings.options : { autoClearContext: true, vaultAutoSummary: false, localMaxHistoryTurns: 6 };
     const box = $("behavior");
     box.textContent = "";
+    const barToggle = toggle("progressBarByDifficulty", "Color the progress bar by difficulty", "", barByDifficulty);
+    barToggle.querySelector("input").addEventListener("change", (e) => {
+      // Not a tutor setting: it must not set off the form's own save.
+      e.stopPropagation();
+      barByDifficulty = e.target.checked;
+      api.storage.local.set({ [BAR_STYLE_KEY]: barByDifficulty ? "difficulty" : "green" });
+    });
+    box.appendChild(barToggle);
     box.appendChild(
       toggle("autoClearContext", "Start fresh on each problem", "", o.autoClearContext, {
         locked: !inBrowser && helperLocked("autoClearContext"),
@@ -2105,6 +2119,12 @@
     }
     ext = res.result;
     catalog = ext.catalog;
+    try {
+      const stored = await api.storage.local.get(BAR_STYLE_KEY);
+      barByDifficulty = stored[BAR_STYLE_KEY] !== "green";
+    } catch {
+      barByDifficulty = true;
+    }
     loadDraft(ext.settings);
     for (const [id, runtime] of Object.entries(ext.settings.runtimes)) runtimeChoice[id] = runtime;
     selected = ext.settings.provider;

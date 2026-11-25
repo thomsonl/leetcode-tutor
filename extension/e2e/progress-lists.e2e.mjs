@@ -171,7 +171,7 @@ try {
       total: document.querySelector('.total').textContent,
       next: document.querySelector('.next-up').textContent,
       nodes: document.querySelectorAll('.node').length,
-      cards: [...document.querySelectorAll('.group')].map((g) => ({ id: g.dataset.topic, step: g.querySelector('.group-step').textContent, title: g.querySelector('.group-title').textContent, count: g.querySelector('.node-count').textContent, next: g.hasAttribute('data-next'), complete: g.hasAttribute('data-complete'), levels: [...g.querySelectorAll('.group-level')].filter((l) => !l.hidden).map((l) => l.querySelector('.group-level-text').textContent), label: g.getAttribute('aria-label') })),
+      cards: [...document.querySelectorAll('.group')].map((g) => ({ id: g.dataset.topic, step: g.querySelector('.group-step').textContent, title: g.querySelector('.group-title').textContent, count: g.querySelector('.node-count').textContent, next: g.hasAttribute('data-next'), complete: g.hasAttribute('data-complete'), minis: g.querySelectorAll('.group-level, .group-levels').length, segs: [...g.querySelectorAll('.node-bar .node-seg')].map((x) => x.title), label: g.getAttribute('aria-label') })),
       foot: document.querySelectorAll('#progress-foot').length,
     })`);
     check(m.sub === 'Your Blind 75 progress' && m.title === 'Blind 75' && m.nodes === 0, JSON.stringify(m));
@@ -182,7 +182,9 @@ try {
     check(m.cards.map((c) => c.step).join() === '1,2,3,4,5,6,7,8,9,10', 'numbered');
     check(m.cards[0].count === '9 / 10' && m.cards[0].next && m.cards.filter((c) => c.next).length === 1, JSON.stringify(m.cards[0]));
     check(m.cards[2].count === '2 / 11', `DP counts Climbing Stairs and Combination Sum IV: ${m.cards[2].count}`);
-    check(JSON.stringify(m.cards[0].levels) === JSON.stringify(['E 3/3', 'M 6/7']), `difficulty parts: ${m.cards[0].levels}`);
+    // One multi-colored bar per card (no second row of mini bars), each segment saying what it is.
+    check(m.cards.every((c) => c.minis === 0), 'no second set of difficulty bars');
+    check(JSON.stringify(m.cards[0].segs) === JSON.stringify(['Easy: 3 of 3 solved', 'Medium: 6 of 7 solved']), `difficulty segments: ${m.cards[0].segs}`);
     check(m.cards[0].label === 'Array, category 1 of 10, 9 of 10 solved, recommended next. Easy 3 of 3, Medium 6 of 7', m.cards[0].label);
     check(m.foot === 0, 'no description at the bottom');
     await page.screenshot(path.join(shots, 'blind-dark.png'), { width: 1280, height: 1100, scheme: 'dark' });

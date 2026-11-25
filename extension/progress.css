@@ -48,6 +48,48 @@
   }
 }
 
+/* The Progress card in the Tutor panel (progress-card.html) is told which
+   theme the page is using, which a system color scheme cannot say. */
+:root[data-theme="dark"] {
+  --easy: #2cbb5d;
+  --medium: #ffa116;
+  --hard: #f8615c;
+  --star: #ffc01e;
+  --canvas: #141416;
+  --dots: rgba(255, 255, 255, 0.09);
+  --edge: rgba(255, 255, 255, 0.24);
+  --edge-lit: #8b84ff;
+  --node-a: #6c66f2;
+  --node-b: #5048e0;
+  --node-line: rgba(255, 255, 255, 0.14);
+  --node-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 16px rgba(0, 0, 0, 0.35);
+  --next: #fbbf24;
+  --row-next: rgba(251, 191, 36, 0.08);
+  --solved: #2cbb5d;
+  --backdrop: rgba(0, 0, 0, 0.55);
+  --drawer-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
+}
+:root[data-theme="light"] {
+  --easy: #0e8a3a;
+  --medium: #b35300;
+  --hard: #d32f2f;
+  --star: #c98a00;
+  --canvas: #f6f6fa;
+  --dots: rgba(40, 40, 80, 0.13);
+  --edge: rgba(70, 70, 110, 0.32);
+  --edge-lit: #6c63ff;
+  --node-a: #6366f1;
+  --node-b: #4f46e5;
+  --node-line: rgba(255, 255, 255, 0.16);
+  --node-shadow: 0 1px 2px rgba(30, 27, 75, 0.18), 0 4px 12px rgba(79, 70, 229, 0.18);
+  --next: #f59e0b;
+  --next-text: #1a1a1a;
+  --row-next: rgba(245, 158, 11, 0.1);
+  --solved: #16a34a;
+  --backdrop: rgba(0, 0, 0, 0.32);
+  --drawer-shadow: -8px 0 32px rgba(0, 0, 0, 0.14);
+}
+
 /* ---- the tab bar ---------------------------------------------------------- */
 
 .tabs { display: flex; gap: 24px; margin: -4px 0 20px; border-bottom: 1px solid var(--line); }
@@ -70,11 +112,15 @@ body[data-tab="progress"] #connection, body[data-tab="changelog"] #connection { 
 
 .bar { display: block; height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
 .bar-fill { display: block; height: 100%; border-radius: 3px; background: var(--solved); }
+/* Filled by difficulty: the solved Easy, Medium and Hard side by side, each in
+   its own color, as wide as its share of the whole list. */
+.bar[data-style="difficulty"] { display: flex; }
+.bar-seg { display: block; flex: none; height: 100%; }
+.bar-seg[data-level="Easy"] { background: var(--easy); }
+.bar-seg[data-level="Medium"] { background: var(--medium); }
+.bar-seg[data-level="Hard"] { background: var(--hard); }
 
 .summary-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px; margin-top: 14px; }
-.levels { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0; padding: 0; list-style: none; }
-.levels li { display: flex; align-items: baseline; gap: 6px; }
-.level-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .next-up { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; margin: 0; min-width: 0; }
 .next-up.done { color: var(--green-text); }
 .next-label { color: var(--muted); }
@@ -135,6 +181,13 @@ body[data-tab="progress"] #connection, body[data-tab="changelog"] #connection { 
 .node-meter { display: flex; align-items: center; gap: 8px; }
 .node-bar { flex: 1; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.24); overflow: hidden; }
 .node-fill { display: block; height: 100%; border-radius: 3px; background: #4ade80; }
+/* Filled by difficulty: the solved Easy, Medium and Hard side by side, in colors
+   bright enough for the indigo nodes (the big bar uses the page's own). */
+.node-bar[data-style="difficulty"] { display: flex; }
+.node-seg { display: block; flex: none; height: 100%; }
+.node-seg[data-level="Easy"] { background: #4ade80; }
+.node-seg[data-level="Medium"] { background: #fbbf24; }
+.node-seg[data-level="Hard"] { background: #f87171; }
 .node-count { flex: none; font-size: 12px; line-height: 16px; font-weight: 500; color: rgba(255, 255, 255, 0.88); font-variant-numeric: tabular-nums; }
 .node-badge {
   display: none; position: absolute; top: -10px; right: 12px; height: 20px; padding: 0 8px; border-radius: 10px;
@@ -145,6 +198,10 @@ body[data-tab="progress"] #connection, body[data-tab="changelog"] #connection { 
 .node[data-complete] .node-count::before { content: "\2713"; margin-right: 4px; color: #4ade80; font-weight: 700; }
 .graph[data-size="compact"] .node { padding: 0 10px; gap: 7px; border-radius: 10px; }
 .graph[data-size="compact"] .node-title { font-size: 13px; line-height: 17px; }
+.graph[data-size="card"] .node { padding: 0 6px; gap: 5px; border-radius: 8px; }
+.graph[data-size="card"] .node-title { font-size: 11px; line-height: 15px; }
+.graph[data-size="card"] .node-count { font-size: 11px; line-height: 14px; }
+.graph[data-size="card"] .node-bar { height: 4px; }
 
 /* ---- groups: every list without a roadmap graph ------------------------------ */
 
@@ -172,22 +229,6 @@ body[data-tab="progress"] #connection, body[data-tab="changelog"] #connection { 
 }
 .group-title { min-width: 0; font-size: 14px; line-height: 20px; font-weight: 600; overflow-wrap: anywhere; }
 .group .node-meter { margin-top: auto; }
-.group-levels { display: flex; gap: 6px; }
-.group-level { display: flex; flex-direction: column; gap: 4px; flex-basis: 0; min-width: 34px; }
-.group-level[hidden] { display: none; }
-.group-level-bar { display: block; height: 3px; border-radius: 2px; overflow: hidden; }
-.group-level-fill { display: block; height: 100%; border-radius: 2px; }
-.group-level-text { display: block; font-size: 12px; line-height: 15px; font-weight: 500; color: rgba(255, 255, 255, 0.86); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.group-level-text::first-letter { font-weight: 700; }
-.group-level[data-level="Easy"] .group-level-bar { background: rgba(134, 239, 172, 0.3); }
-.group-level[data-level="Easy"] .group-level-text::first-letter { color: #86efac; }
-.group-level[data-level="Easy"] .group-level-fill { background: #86efac; }
-.group-level[data-level="Medium"] .group-level-bar { background: rgba(252, 211, 77, 0.3); }
-.group-level[data-level="Medium"] .group-level-text::first-letter { color: #fcd34d; }
-.group-level[data-level="Medium"] .group-level-fill { background: #fcd34d; }
-.group-level[data-level="Hard"] .group-level-bar { background: rgba(252, 165, 165, 0.3); }
-.group-level[data-level="Hard"] .group-level-text::first-letter { color: #fca5a5; }
-.group-level[data-level="Hard"] .group-level-fill { background: #fca5a5; }
 
 /* ---- the side panel ------------------------------------------------------------- */
 
@@ -302,3 +343,10 @@ html.drawer-open { overflow: hidden; scrollbar-gutter: auto; }
 @media (max-width: 760px) {
   .total-box { justify-content: flex-start; margin: 4px 0 8px; }
 }
+
+/* ---- the popup in the Tutor panel ------------------------------------------
+   progress-card.html is framed in a popup over the page: no page header or
+   tabs, and the problem drawer fills the frame. */
+body.embed { background: var(--page); }
+body.embed main { max-width: none; margin: 0; padding: 14px; }
+body.embed .drawer { width: min(560px, 100%); }

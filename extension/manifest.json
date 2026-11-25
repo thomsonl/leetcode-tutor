@@ -55,7 +55,8 @@
     {
       "resources": [
         "inject.js",
-        "layout-bridge.js"
+        "layout-bridge.js",
+        "progress-card.html"
       ],
       "matches": [
         "https://leetcode.com/*"

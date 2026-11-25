@@ -77,7 +77,9 @@ try {
       settingsHidden: document.getElementById('panel-settings').hidden,
       sub: document.getElementById('page-sub').textContent,
       total: document.querySelector('.total').textContent,
-      levels: [...document.querySelectorAll('.levels li')].map((li) => li.textContent),
+      levels: document.querySelectorAll('.levels').length,
+      segs: [...document.querySelectorAll('#summary .bar .bar-seg')].map((x) => x.title),
+      barLabel: document.querySelector('#summary .bar').getAttribute('aria-label'),
       next: document.querySelector('.next-up').textContent,
       nextHref: document.querySelector('.next-up a').href,
       connection: getComputedStyle(document.getElementById('connection')).display,
@@ -86,9 +88,31 @@ try {
     check(m.sub === 'Your NeetCode 150 progress' && m.connection === 'none', `header: ${JSON.stringify(m)}`);
     check(m.total === '11 / 150 solved', `total (the problem off the roadmap does not count): ${m.total}`);
     const easy = NEETCODE_150.topics.flatMap((t) => t.problems).filter((p) => p.difficulty === 'Easy');
-    check(m.levels[0] === `Easy${easy.filter((p) => seed[p.slug]).length} / ${easy.length}`, `levels: ${JSON.stringify(m.levels)}`);
+    // No separate Easy / Medium / Hard row: the one bar carries it (tooltips, accessible name).
+    check(m.levels === 0, 'no difficulty counts row');
+    check(m.segs[0] === `Easy: ${easy.filter((p) => seed[p.slug]).length} solved`, `segment tooltips: ${JSON.stringify(m.segs)}`);
+    check(m.barLabel.includes(`Easy ${easy.filter((p) => seed[p.slug]).length} of ${easy.length}`), `bar name: ${m.barLabel}`);
     check(m.next === `Next up${expectedNext.title}inArrays & Hashing`, `next: ${m.next}`);
     check(m.nextHref === `https://leetcode.com/problems/${expectedNext.slug}/`, `next link: ${m.nextHref}`);
+  });
+
+  await scenario('the progress bar is filled by difficulty by default, all green by choice, and follows the choice at once', async () => {
+    const all = NEETCODE_150.topics.flatMap((t) => t.problems);
+    const solvedBy = (level) => all.filter((p) => p.difficulty === level && seed[p.slug]).length;
+    const widths = () => page.eval(`(() => { const bar = document.querySelector('#summary .bar'); return { style: bar.dataset.style || null, segs: [...bar.querySelectorAll('.bar-seg')].map((s) => [s.dataset.level, parseFloat(s.style.width), getComputedStyle(s).backgroundColor]), fill: bar.querySelector('.bar-fill') ? parseFloat(bar.querySelector('.bar-fill').style.width) : null }; })()`);
+    let m = await widths();
+    check(m.style === 'difficulty' && m.segs.length === 3 && m.fill === null, `by difficulty: ${JSON.stringify(m)}`);
+    const pct = (n) => Math.round((n / 150) * 1000) / 10;
+    check(m.segs.every(([level, width]) => width === pct(solvedBy(level))), `each segment is its share of the list: ${JSON.stringify(m.segs)} vs ${['Easy', 'Medium', 'Hard'].map((l) => pct(solvedBy(l)))}`);
+    check(new Set(m.segs.map((x) => x[2])).size === 3, `three colors: ${JSON.stringify(m.segs)}`);
+    const total = m.segs.reduce((n, x) => n + x[1], 0);
+    check(Math.abs(total - pct(11)) < 0.3, `together they are the solved share: ${total}`);
+    await browser.serviceWorkerEval(`chrome.storage.local.set({ progressBarStyle: 'green' })`);
+    await page.waitFor(`document.querySelector('#summary .bar .bar-fill') && !document.querySelector('#summary .bar .bar-seg')`, { what: 'the green bar' });
+    m = await widths();
+    check(m.fill === pct(11) && m.segs.length === 0, `green: ${JSON.stringify(m)}`);
+    await browser.serviceWorkerEval(`chrome.storage.local.remove('progressBarStyle')`);
+    await page.waitFor(`document.querySelectorAll('#summary .bar .bar-seg').length === 3`, { what: 'back to difficulty' });
   });
 
   await scenario('the graph: 18 topic nodes with solved counts, the recommended topic marked, every prerequisite line', async () => {

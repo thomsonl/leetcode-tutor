@@ -45,6 +45,11 @@ export const SOLVED_KEY = 'solvedProblems';
 export const STARRED_KEY = 'starredProblems';
 export const ACTIVE_LIST_KEY = 'activeProgressList';
 export const SYNCED_AT_KEY = 'solvedSyncedAt';
+// How the progress bars are filled: by the difficulty of the solved problems
+// (the default), or all in the one green. Kept in storage.local by the
+// options page, read by the Progress view and its popup.
+export const BAR_STYLE_KEY = 'progressBarStyle';
+export const normalizeBarStyle = (value) => (value === 'green' ? 'green' : 'difficulty');
 // How long an automatic sync waits for the next one; the button ignores it.
 export const SYNC_EVERY_MS = 12 * 60 * 60 * 1000;
 const MAX_SYNC = 6000;

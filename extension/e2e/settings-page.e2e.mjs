@@ -291,6 +291,19 @@ await scenario('environment variables lock their fields and are never sent back 
   await page.screenshot(path.join(shots, 'locked-dark.png'), { scheme: 'dark' });
 });
 
+await scenario('Advanced has the progress bar colors choice: by difficulty by default, saved at once in storage, and not a tutor setting', companion(), async (page) => {
+  assert.equal(await page.eval(`document.getElementById('progressBarByDifficulty').checked`), true, 'by difficulty is the default');
+  const before = savedCalls(page, 'save');
+  await page.click('#progressBarByDifficulty');
+  for (let i = 0; i < 30 && (await browser.serviceWorkerEval(`chrome.storage.local.get('progressBarStyle')`)).progressBarStyle !== 'green'; i += 1) await new Promise((r) => setTimeout(r, 100));
+  assert.equal((await browser.serviceWorkerEval(`chrome.storage.local.get('progressBarStyle')`)).progressBarStyle, 'green');
+  await new Promise((r) => setTimeout(r, 600));
+  assert.equal(savedCalls(page, 'save'), before, 'the tutor settings were not saved for it');
+  await page.click('#progressBarByDifficulty');
+  for (let i = 0; i < 30 && (await browser.serviceWorkerEval(`chrome.storage.local.get('progressBarStyle')`)).progressBarStyle !== 'difficulty'; i += 1) await new Promise((r) => setTimeout(r, 100));
+  assert.equal((await browser.serviceWorkerEval(`chrome.storage.local.get('progressBarStyle')`)).progressBarStyle, 'difficulty');
+});
+
 await scenario('a refused save shows the reason, marks the offending field and leaves focus alone', companion({ stored: applyPatch(emptySettings(), { provider: 'local', providers: { local: { model: 'qwen3:8b' } } }), saveError: { message: 'model can\'t be empty', field: 'model' } }), async (page) => {
   await leave(page, '#autoClearContext');
   await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Not saved')`);

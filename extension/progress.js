@@ -17,12 +17,21 @@
 // All text is inserted with textContent / createElement, never innerHTML.
 
 import { DEFAULT_LIST_ID, LISTS, listById, nextOnRoadmap, problemUrl, progress } from './shared/roadmap.js';
-import { ACTIVE_LIST_KEY, SOLVED_KEY, STARRED_KEY, SYNCED_AT_KEY, normalizeSolved, normalizeStarred } from './shared/solved.js';
+import { ACTIVE_LIST_KEY, BAR_STYLE_KEY, SOLVED_KEY, STARRED_KEY, SYNCED_AT_KEY, normalizeBarStyle, normalizeSolved, normalizeStarred } from './shared/solved.js';
 import { showChangelog } from './changelog.js';
 
 const api = typeof browser !== 'undefined' ? browser : chrome;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const $ = (id) => document.getElementById(id);
+
+// The card in the Tutor panel: this same view in a small frame, with no tabs
+// or page header (progress-card.html, "?embed"). The panel passes its theme.
+const EMBED = new URLSearchParams(location.search).has('embed');
+if (EMBED) {
+  const theme = new URLSearchParams(location.search).get('theme');
+  if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
+  document.body.classList.add('embed');
+}
 
 // Where each topic sits: x in columns (0 to 4, halves between), y in rows,
 // like neetcode.io's roadmap read top to bottom.
@@ -57,6 +66,10 @@ const COMPACT_SHORT = { heap: 'Heap / PQ' };
 // phone; the page itself never does).
 const WIDE = { node: [176, 64], step: [200, 104], pad: 28 };
 const COMPACT = { node: [148, 60], step: [164, 96], pad: 20 };
+// The graph in the Tutor panel's popup when even COMPACT does not fit: smaller
+// nodes, then scaled to fit.
+const CARD = { node: [104, 46], step: [112, 66], pad: 10 };
+const CARD_SHORT = { 'arrays-hashing': 'Arrays & Hash', 'advanced-graphs': 'Adv. Graphs', 'bit-manipulation': 'Bit Manip.', heap: 'Heap / PQ' };
 const graphWidth = (m) => 4 * m.step[0] + m.node[0] + 2 * m.pad;
 const graphHeight = (m) => 7 * m.step[1] + m.node[1] + 2 * m.pad;
 
@@ -131,10 +144,49 @@ function percent(done, total) {
   return total ? Math.round((done / total) * 1000) / 10 : 0;
 }
 
-function bar(done, total, label) {
+// How the bars are filled (see shared/solved.js BAR_STYLE_KEY).
+let barStyle = 'difficulty';
+
+// The bar inside a topic node or a group card, filled the same way as the big
+// one: side by side in the colors of the difficulties (each segment is its
+// share of this topic, and says so when pointed at), or one fill. Redrawn on
+// every render, since both the solved problems and the style can change.
+function fillMeter(meter, problems, total) {
+  meter.textContent = '';
+  if (barStyle === 'difficulty') {
+    for (const level of LEVELS) {
+      const of = problems.filter((p) => p.difficulty === level);
+      const done = of.filter((p) => solved[p.slug]).length;
+      if (!done) continue;
+      const seg = h('span', { class: 'node-seg', 'data-level': level, title: `${level}: ${done} of ${of.length} solved` });
+      seg.style.width = `${percent(done, total)}%`;
+      meter.appendChild(seg);
+    }
+    meter.dataset.style = 'difficulty';
+    return;
+  }
+  delete meter.dataset.style;
+  const fill = h('span', { class: 'node-fill' });
+  fill.style.width = `${percent(problems.filter((p) => solved[p.slug]).length, total)}%`;
+  meter.appendChild(fill);
+}
+
+// A progress bar. `byLevel` ({ Easy, Medium, Hard }: how many of each are
+// solved) fills it in the colors of the difficulties, side by side; with the
+// green style, or no breakdown, it is one green fill.
+function bar(done, total, label, byLevel) {
+  const attrs = { class: 'bar', role: 'progressbar', 'aria-label': label, 'aria-valuemin': '0', 'aria-valuemax': String(total), 'aria-valuenow': String(done) };
+  if (byLevel && barStyle === 'difficulty') {
+    const segments = LEVELS.map((level) => {
+      const seg = h('span', { class: 'bar-seg', 'data-level': level, title: `${level}: ${byLevel[level] || 0} solved` });
+      seg.style.width = `${percent(byLevel[level] || 0, total)}%`;
+      return seg;
+    });
+    return h('span', { ...attrs, 'data-style': 'difficulty' }, ...segments);
+  }
   const fill = h('span', { class: 'bar-fill' });
   fill.style.width = `${percent(done, total)}%`;
-  return h('span', { class: 'bar', role: 'progressbar', 'aria-label': label, 'aria-valuemin': '0', 'aria-valuemax': String(total), 'aria-valuenow': String(done) }, fill);
+  return h('span', attrs, fill);
 }
 
 // The groups on screen: the list's own, or its subjects when that view is on.
@@ -178,7 +230,7 @@ function selectTab(name, { focus = false, push = true } = {}) {
     if (on && focus) button.focus();
   }
   document.body.dataset.tab = name;
-  $('page-sub').textContent = subtitle(name);
+  if ($('page-sub')) $('page-sub').textContent = subtitle(name);
   if (push) {
     const url = name === 'progress' || name === 'changelog' ? `#${name}` : `${location.pathname}${location.search}`;
     history.replaceState(null, '', url);
@@ -257,7 +309,7 @@ function useList(id) {
   if (openTopic) closeDrawer({ restore: false });
   metrics = null;
   if (built) $('canvas').textContent = '';
-  if (document.body.dataset.tab === 'progress') $('page-sub').textContent = subtitle('progress');
+  if (document.body.dataset.tab === 'progress' && $('page-sub')) $('page-sub').textContent = subtitle('progress');
   return true;
 }
 
@@ -380,25 +432,25 @@ function renderSummary() {
       h(
         'div',
         { class: 'total-box' },
-        h(
-          'div',
-          { class: 'sync-group' },
-          h('button', { type: 'button', class: 'btn sync-btn', id: 'sync-btn', onclick: () => syncFromLeetCode() }, 'Sync from LeetCode'),
-          h('span', { class: 'sync-last', id: 'sync-last' })
-        ),
+        // The card in the Tutor panel has no sync button, only the numbers.
+        EMBED
+          ? null
+          : h(
+              'div',
+              { class: 'sync-group' },
+              h('button', { type: 'button', class: 'btn sync-btn', id: 'sync-btn', onclick: () => syncFromLeetCode() }, 'Sync from LeetCode'),
+              h('span', { class: 'sync-last', id: 'sync-last' })
+            ),
         h('p', { class: 'total' }, h('span', { class: 'total-done', text: String(all.solved) }), h('span', { class: 'total-of', text: ` / ${all.total} solved` })),
-        h('p', { class: 'sync-status', id: 'sync-status', role: 'status', 'aria-live': 'polite' })
+        EMBED ? null : h('p', { class: 'sync-status', id: 'sync-status', role: 'status', 'aria-live': 'polite' })
       )
     ),
-    bar(all.solved, all.total, `${ROADMAP.title} solved`),
+    // One multi-colored bar; the split by difficulty is in each segment's tooltip
+    // and in the bar's accessible name, not a row of its own.
+    bar(all.solved, all.total, `${ROADMAP.title} solved: ${LEVELS.map((l) => `${l} ${counts[l].done} of ${counts[l].total}`).join(', ')}`, Object.fromEntries(LEVELS.map((l) => [l, counts[l].done]))),
     h(
       'div',
       { class: 'summary-foot' },
-      h(
-        'ul',
-        { class: 'levels', 'aria-label': 'Solved by difficulty' },
-        ...LEVELS.map((l) => h('li', {}, difficulty(l), h('span', { class: 'level-count', text: `${counts[l].done} / ${counts[l].total}` })))
-      ),
       next
         ? h(
             'p',
@@ -514,12 +566,12 @@ function renderGraph() {
         'button',
         { type: 'button', class: 'node', 'data-topic': topic.id, onclick: (e) => openDrawer(topic.id, e.currentTarget) },
         h('span', { class: 'node-title', text: SHORT[topic.id] || topic.title }),
-        h('span', { class: 'node-meter' }, h('span', { class: 'node-bar' }, h('span', { class: 'node-fill' })), h('span', { class: 'node-count' })),
+        h('span', { class: 'node-meter' }, h('span', { class: 'node-bar' }), h('span', { class: 'node-count' })),
         h('span', { class: 'node-badge', text: 'Next', 'aria-hidden': 'true' })
       );
       graph.appendChild(node);
     }
-    node.querySelector('.node-fill').style.width = `${percent(stats.solved, stats.total)}%`;
+    fillMeter(node.querySelector('.node-bar'), topic.problems, stats.total);
     node.querySelector('.node-count').textContent = `${stats.solved} / ${stats.total}`;
     const isNext = Boolean(next && next.topic === topic.id);
     node.toggleAttribute('data-next', isNext);
@@ -537,17 +589,21 @@ function layoutGraph() {
   const canvas = $('canvas');
   const graph = $('graph');
   if (!canvas || !graph || canvas.clientWidth === 0) return;
-  const m = canvas.clientWidth >= graphWidth(WIDE) ? WIDE : COMPACT;
+  const room = canvas.clientWidth;
+  // In the card the size is picked from the room there is; below the smallest
+  // layout it is scaled down to fit, so the whole graph is always in view.
+  const m = room >= graphWidth(WIDE) ? WIDE : room >= graphWidth(COMPACT) || !EMBED ? COMPACT : CARD;
   const changed = metrics !== m;
   metrics = m;
-  graph.dataset.size = m === WIDE ? 'wide' : 'compact';
+  graph.dataset.size = m === WIDE ? 'wide' : m === COMPACT ? 'compact' : 'card';
+  graph.style.zoom = EMBED ? String(Math.min(1, room / graphWidth(m))) : '';
   graph.style.width = `${graphWidth(m)}px`;
   graph.style.height = `${graphHeight(m)}px`;
   const [w, hgt] = m.node;
   const at = (id) => ({ x: m.pad + LAYOUT[id][0] * m.step[0], y: m.pad + LAYOUT[id][1] * m.step[1] });
   for (const node of graph.querySelectorAll('.node')) {
     const id = node.dataset.topic;
-    const label = (m === COMPACT && COMPACT_SHORT[id]) || SHORT[id] || topicById(id).title;
+    const label = (m === CARD && CARD_SHORT[id]) || (m === COMPACT && COMPACT_SHORT[id]) || SHORT[id] || topicById(id).title;
     const title = node.querySelector('.node-title');
     if (title.textContent !== label) title.textContent = label;
     const p = at(id);
@@ -580,7 +636,7 @@ function layoutGraph() {
     // Narrow screens scroll the graph sideways: start with the topic to
     // work on next in view.
     const next = graph.querySelector('.node[data-next]') || graph.querySelector('.node');
-    if (next && graphWidth(m) > canvas.clientWidth) {
+    if (!EMBED && next && graphWidth(m) > canvas.clientWidth) {
       canvas.scrollLeft = Math.max(0, next.offsetLeft + w / 2 - canvas.clientWidth / 2);
     }
   }
@@ -631,12 +687,7 @@ function renderGroups() {
         'button',
         { type: 'button', class: 'group', 'data-topic': topic.id, onclick: (e) => openDrawer(topic.id, e.currentTarget) },
         h('span', { class: 'group-head' }, h('span', { class: 'group-step', text: String(i + 1) }), h('span', { class: 'group-title', text: topic.title })),
-        h('span', { class: 'node-meter' }, h('span', { class: 'node-bar' }, h('span', { class: 'node-fill' })), h('span', { class: 'node-count' })),
-        h(
-          'span',
-          { class: 'group-levels', 'aria-hidden': 'true' },
-          ...LEVELS.map((l) => h('span', { class: 'group-level', 'data-level': l }, h('span', { class: 'group-level-bar' }, h('span', { class: 'group-level-fill' })), h('span', { class: 'group-level-text' })))
-        ),
+        h('span', { class: 'node-meter' }, h('span', { class: 'node-bar' }), h('span', { class: 'node-count' })),
         h('span', { class: 'node-badge', text: 'Next', 'aria-hidden': 'true' })
       );
       box.appendChild(card);
@@ -645,14 +696,9 @@ function renderGroups() {
     for (const l of LEVELS) {
       const of = topic.problems.filter((p) => p.difficulty === l);
       const done = of.filter((p) => solved[p.slug]).length;
-      const part = card.querySelector(`.group-level[data-level="${l}"]`);
-      part.hidden = of.length === 0;
-      part.style.flexGrow = String(of.length);
-      part.querySelector('.group-level-fill').style.width = `${percent(done, of.length)}%`;
-      part.querySelector('.group-level-text').textContent = `${l[0]} ${done}/${of.length}`;
       if (of.length) levels.push(`${l} ${done} of ${of.length}`);
     }
-    card.querySelector('.node-fill').style.width = `${percent(stats.solved, stats.total)}%`;
+    fillMeter(card.querySelector('.node-bar'), topic.problems, stats.total);
     card.querySelector('.node-count').textContent = `${stats.solved} / ${stats.total}`;
     const isNext = Boolean(next && groupOf(next) === topic.id);
     card.toggleAttribute('data-next', isNext);
@@ -787,7 +833,9 @@ function renderDrawer() {
     h('button', { type: 'button', class: 'iconbtn close', 'aria-label': 'Close', title: 'Close', onclick: () => closeDrawer() }, ICONS.close())
   );
   const body = h('div', { class: 'drawer-body' });
-  body.appendChild(bar(stats.solved, stats.total, `${topic.title} solved`));
+  const levelsDone = { Easy: 0, Medium: 0, Hard: 0 };
+  for (const p of topic.problems) if (solved[p.slug]) levelsDone[p.difficulty] += 1;
+  body.appendChild(bar(stats.solved, stats.total, `${topic.title} solved`, levelsDone));
   if (!bySubject()) {
     body.appendChild(h('h3', { text: isGraph() ? 'Prerequisites' : 'Comes after' }));
     body.appendChild(
@@ -1034,7 +1082,8 @@ async function toggleStar(slug) {
 
 async function load() {
   try {
-    const stored = await api.storage.local.get([SOLVED_KEY, STARRED_KEY, ACTIVE_LIST_KEY, SYNCED_AT_KEY]);
+    const stored = await api.storage.local.get([SOLVED_KEY, STARRED_KEY, ACTIVE_LIST_KEY, SYNCED_AT_KEY, BAR_STYLE_KEY]);
+    barStyle = normalizeBarStyle(stored[BAR_STYLE_KEY]);
     solved = normalizeSolved(stored[SOLVED_KEY]);
     starred = normalizeStarred(stored[STARRED_KEY]);
     syncedAt = typeof stored[SYNCED_AT_KEY] === 'string' ? stored[SYNCED_AT_KEY] : '';
@@ -1050,6 +1099,8 @@ api.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (SOLVED_KEY in changes) solved = normalizeSolved(changes[SOLVED_KEY].newValue);
   if (STARRED_KEY in changes) starred = normalizeStarred(changes[STARRED_KEY].newValue);
+  const styleChanged = BAR_STYLE_KEY in changes && barStyle !== normalizeBarStyle(changes[BAR_STYLE_KEY].newValue);
+  if (styleChanged) barStyle = normalizeBarStyle(changes[BAR_STYLE_KEY].newValue);
   if (SYNCED_AT_KEY in changes) {
     const value = changes[SYNCED_AT_KEY].newValue;
     syncedAt = typeof value === 'string' ? value : '';
@@ -1057,22 +1108,33 @@ api.storage.onChanged.addListener((changes, area) => {
   }
   // The list chosen here, in another tab, or from a Tutor card.
   const listChanged = ACTIVE_LIST_KEY in changes && useList(changes[ACTIVE_LIST_KEY].newValue);
-  if (SOLVED_KEY in changes || STARRED_KEY in changes || listChanged) render();
+  if (SOLVED_KEY in changes || STARRED_KEY in changes || listChanged || styleChanged) render();
 });
 
 // The stored list first, so the tab never draws NeetCode 150 for a moment
 // before the list actually chosen.
 await load();
-wireTabs();
+if (EMBED) {
+  document.body.dataset.tab = 'progress';
+  build();
+  // Escape with no problem drawer open asks the panel to close the card.
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !event.defaultPrevented && !openTopic) parent.postMessage({ type: 'lc-progress-card-close' }, '*');
+  });
+} else {
+  wireTabs();
+}
 
 // Keep the button honest: ask whether LeetCode is signed in now, whenever the
 // page comes back into view, and every 30 seconds while it is open (the same
 // tick keeps "Last synced 5 min ago" current).
-refreshLogin();
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) refreshLogin();
-});
-window.addEventListener('focus', () => refreshLogin());
-setInterval(() => {
-  if (!document.hidden) refreshLogin();
-}, 30000);
+if (!EMBED) {
+  refreshLogin();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshLogin();
+  });
+  window.addEventListener('focus', () => refreshLogin());
+  setInterval(() => {
+    if (!document.hidden) refreshLogin();
+  }, 30000);
+}

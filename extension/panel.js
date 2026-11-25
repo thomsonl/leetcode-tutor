@@ -1785,6 +1785,142 @@
 
   // ---- the panel -------------------------------------------------------
 
+  // The progress popup: the Progress page's own view (progress-card.html, the
+  // graphs and the solved counts) in a dialog over the page, like LeetCode's
+  // own Settings dialog but with only a light dim behind it. It is built on the
+  // page itself, not inside the panel (the panel clips what is inside it), the
+  // first time it is opened and kept, so reopening is instant and it stays
+  // live. Escape, the close button and a click outside it close it.
+  let progressModal = null;
+  const PROGRESS_MODAL_ID = "lc-tutor-progress-modal";
+
+  function progressModalCss(theme) {
+    const dark = theme === "dark";
+    return `
+      :host { all: initial; }
+      .backdrop {
+        position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: center; justify-content: center;
+        background: rgba(0, 0, 0, ${dark ? "0.42" : "0.28"}); font: 14px / 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        animation: fade 0.16s ease-out;
+      }
+      .backdrop[hidden] { display: none; }
+      .dialog {
+        box-sizing: border-box; display: flex; flex-direction: column; width: min(1120px, 92vw); height: min(880px, 90vh); overflow: hidden;
+        border: 1px solid ${dark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.12)"}; border-radius: 12px;
+        background: ${dark ? "#282828" : "#ffffff"}; color: ${dark ? "#f5f5f5" : "#262626"};
+        box-shadow: 0 24px 64px rgba(0, 0, 0, ${dark ? "0.55" : "0.3"}); outline: none;
+        animation: rise 0.16s ease-out;
+      }
+      .head { flex: none; display: flex; align-items: center; gap: 12px; padding: 14px 16px 12px 22px; }
+      .title { flex: 1; min-width: 0; margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; }
+      button { all: unset; box-sizing: border-box; cursor: pointer; border-radius: 6px; color: ${dark ? "rgba(255, 255, 255, 0.62)" : "rgba(0, 0, 0, 0.55)"}; }
+      button:hover { color: ${dark ? "#f5f5f5" : "#262626"}; background: ${dark ? "rgba(255, 255, 255, 0.07)" : "rgba(0, 0, 0, 0.05)"}; }
+      button:focus-visible { outline: 2px solid ${dark ? "#6aa7ff" : "#1a73e8"}; outline-offset: 1px; }
+      .link { padding: 3px 10px; font-size: 13px; line-height: 20px; }
+      .close { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; }
+      iframe { flex: 1; min-height: 0; width: 100%; border: 0; border-top: 1px solid ${dark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)"}; background: transparent; color-scheme: normal; }
+      @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes rise { from { transform: translateY(6px); } to { transform: none; } }
+      @media (prefers-reduced-motion: reduce) { .backdrop, .dialog { animation: none; } }
+    `;
+  }
+
+  function buildProgressModal(runtime, theme, onClose) {
+    const host = document.createElement("div");
+    host.id = PROGRESS_MODAL_ID;
+    const root = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = progressModalCss(theme);
+    const backdrop = el("div", "backdrop");
+    backdrop.hidden = true;
+    const dialog = el("div", "dialog");
+    dialog.tabIndex = -1;
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", "Your progress");
+    const head = el("div", "head");
+    const title = el("h2", "title", "Your progress");
+    const full = el("button", "link", "Open full page");
+    full.type = "button";
+    const close = el("button", "close", "");
+    close.type = "button";
+    close.setAttribute("aria-label", "Close");
+    close.title = "Close";
+    close.innerHTML =
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+    head.append(title, full, close);
+    const frame = document.createElement("iframe");
+    frame.title = "Your progress";
+    dialog.append(head, frame);
+    backdrop.appendChild(dialog);
+    root.append(style, backdrop);
+    // Keys typed in the popup stay out of LeetCode's own shortcuts.
+    for (const type of ["keydown", "keyup", "keypress"]) host.addEventListener(type, (e) => e.stopPropagation());
+    backdrop.addEventListener("pointerdown", (event) => {
+      if (event.target === backdrop) onClose(true);
+    });
+    close.addEventListener("click", () => onClose(true));
+    full.addEventListener("click", () => {
+      sendToWorker({ type: "lc-tutor:open-progress" });
+      onClose(false);
+    });
+    return { host, style, backdrop, dialog, frame, theme, runtime, loadedTheme: null };
+  }
+
+  // The page's theme as the popup should draw it.
+  function pageTheme() {
+    const scheme = getComputedStyle(document.documentElement).colorScheme || "";
+    if (/\blight\b/.test(scheme) && !/\bdark\b/.test(scheme)) return "light";
+    if (/\bdark\b/.test(scheme)) return "dark";
+    return document.documentElement.classList.contains("dark") ? "dark" : "light";
+  }
+
+  function wireProgressCard(p) {
+    const { progress } = p;
+    const runtime = typeof chrome !== "undefined" && chrome.runtime && typeof chrome.runtime.getURL === "function" ? chrome.runtime : null;
+    const isOpen = () => Boolean(progressModal && !progressModal.backdrop.hidden);
+    const close = (restoreFocus = false) => {
+      if (!isOpen()) return;
+      progressModal.backdrop.hidden = true;
+      progress.setAttribute("aria-expanded", "false");
+      if (restoreFocus) progress.focus();
+    };
+    const open = () => {
+      if (!runtime) return;
+      const theme = pageTheme();
+      if (!progressModal) {
+        progressModal = buildProgressModal(runtime, theme, close);
+        document.body.appendChild(progressModal.host);
+      }
+      if (progressModal.loadedTheme !== theme) {
+        // A different theme than it was drawn in: restyled, and the view reloaded in it.
+        progressModal.style.textContent = progressModalCss(theme);
+        progressModal.loadedTheme = theme;
+        progressModal.frame.src = `${runtime.getURL("progress-card.html")}?embed&theme=${theme}`;
+      }
+      p.menu.hidden = true;
+      progressModal.backdrop.hidden = false;
+      progress.setAttribute("aria-expanded", "true");
+      progressModal.dialog.focus();
+    };
+    p.closeProgressCard = close;
+    progress.addEventListener("click", () => (isOpen() ? close() : open()));
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Escape" && isOpen()) {
+          event.stopPropagation();
+          close(true);
+        }
+      },
+      true
+    );
+    // Escape pressed inside the frame (where the page cannot see it).
+    window.addEventListener("message", (event) => {
+      if (progressModal && event.source === progressModal.frame.contentWindow && event.data && event.data.type === "lc-progress-card-close") close(true);
+    });
+  }
+
   function buildPanel() {
     const host = document.createElement("div");
     host.id = HOST_ID;
@@ -1876,7 +2012,8 @@
     progress.innerHTML =
       '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>';
-    progress.addEventListener("click", () => sendToWorker({ type: "lc-tutor:open-progress" }));
+    progress.setAttribute("aria-haspopup", "dialog");
+    progress.setAttribute("aria-expanded", "false");
     // The mode switch (see "The mode switch" below): toggle buttons, not a
     // radio group, since choosing one starts a new conversation and moving
     // between them with the arrow keys must not.
@@ -2021,6 +2158,7 @@
     const p = { host, wrap, status, statusText, headRight, modeGroup, modeThumb, modeButtons, updateRow, updateText, model, provider, menu, gear, practice, progress, banner, scroll, view, feed, box, input, send, hint, counter };
     for (const [id, button] of Object.entries(modeButtons)) button.addEventListener("click", () => chooseMode(id));
     wireSwitcher(p);
+    wireProgressCard(p);
     return p;
   }
 
@@ -2957,6 +3095,7 @@
     if (p.practice.hidden !== practiceHidden) p.practice.hidden = practiceHidden;
     const progressHidden = !messagingRuntime();
     if (p.progress.hidden !== progressHidden) p.progress.hidden = progressHidden;
+    if (progressHidden && p.closeProgressCard) p.closeProgressCard();
 
     const canSend = conn.ok && Boolean(slug);
     p.input.disabled = !canSend;
