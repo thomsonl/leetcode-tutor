@@ -7,8 +7,8 @@ The listing text, single purpose and permission justifications are shared with F
 
 ## Version
 
-`manifest.json` is at `1.3.0`, and that is the version for this upload.
-The dashboard shows version 1.0.0 as the live version, so 1.3.0 is higher and needs no bump.
+`manifest.json` is at `1.4.0`, and that is the version for this upload.
+The store only needs each upload to carry a higher version than the one live there, and 1.4.0 is higher than 1.3.0.
 The store only requires each upload to carry a higher version than the last one; bump before any later upload.
 
 ## Must be done before you press Submit
@@ -19,7 +19,7 @@ The store only requires each upload to carry a higher version than the last one;
    Until it is published, the options page's install command (`npx leetcode-capture-helper install`) fails, so the Claude and ChatGPT subscription paths do not work for a store user.
    If you submit before publishing it, paste the "Description without the subscription line" variant below instead.
 3. Run `npm test` and `npm run lint:amo` in `extension/`.
-4. Run `npm run build:chrome` in `extension/` and upload `extension/web-ext-artifacts/leetcode_capture-chrome-1.3.0.zip`.
+4. Run `npm run build:chrome` in `extension/` and upload `extension/web-ext-artifacts/leetcode_capture-chrome-1.4.0.zip`.
    That is the chrome build of `scripts/build.mjs` (no `background.scripts`, which Chrome warns about), zipped with `manifest.json` at the root.
    `npm run build:amo` makes the Firefox package and is not the one to upload here.
 
@@ -41,7 +41,7 @@ This release is a tutor:
 
 | What | Where | Notes |
 |---|---|---|
-| Extension zip | Package tab | `extension/web-ext-artifacts/leetcode_capture-chrome-1.3.0.zip` after `npm run build:chrome` |
+| Extension zip | Package tab | `extension/web-ext-artifacts/leetcode_capture-chrome-1.4.0.zip` after `npm run build:chrome` |
 | Store icon, 128x128 PNG | Store listing tab | `extension/store-assets/store-icon-128.png` (96x96 artwork with 16 px of transparent padding, as the store's image guidelines ask) |
 | Screenshots, 1280x800 | Store listing tab | The four `extension/store-assets/shot-*.png`, in order (captions below) |
 | Small promo tile, 440x280 | Store listing tab | `extension/store-assets/promo-small-440x280.png` |
