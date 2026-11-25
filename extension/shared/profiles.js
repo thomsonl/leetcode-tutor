@@ -14,7 +14,7 @@
 //
 // Pure JavaScript with no Node API (extension/shared.test.js checks that).
 
-import { OPENAI_FAMILY_NAMES, canonicalModel } from './model-aliases.js';
+import { canonicalModel, tierLabel, tierOf } from './model-aliases.js';
 
 export const PROFILE_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const MAX_PROFILES = 30;
@@ -105,16 +105,12 @@ export function migrateProfiles({ profiles, activeProfile, provider, model }) {
 // the newest of that kind, named as the options page's dropdown names them.
 export const CLAUDE_ALIAS_NAMES = { sonnet: 'Sonnet', opus: 'Opus', haiku: 'Haiku' };
 
-// The OpenAI models are named by family (model-aliases.js): the newest of each
-// is what runs.
-export const OPENAI_MODEL_NAMES = OPENAI_FAMILY_NAMES;
-
-// The name of a model as people read it: the friendly name of a Claude alias
-// or an OpenAI model, otherwise the model as saved.
+// The name of a model as people read it: the friendly name of a Claude alias,
+// the tier of an OpenAI model ("luna" -> "Luna", whatever tiers exist), else
+// the model as saved.
 export function modelName(provider, model) {
-  const has = (names) => Object.prototype.hasOwnProperty.call(names, model);
-  if (provider === 'claude' && has(CLAUDE_ALIAS_NAMES)) return CLAUDE_ALIAS_NAMES[model];
-  if ((provider === 'openai' || provider === 'chatgpt') && has(OPENAI_MODEL_NAMES)) return OPENAI_MODEL_NAMES[model];
+  if (provider === 'claude' && Object.prototype.hasOwnProperty.call(CLAUDE_ALIAS_NAMES, model)) return CLAUDE_ALIAS_NAMES[model];
+  if ((provider === 'openai' || provider === 'chatgpt') && tierOf(model)) return tierLabel(tierOf(model));
   return model;
 }
 

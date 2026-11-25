@@ -844,29 +844,81 @@
 
   // The models each provider's dropdown offers (a value, its name). Each is
   // a family, not a version, and the newest of it is what runs: the Claude
-  // ones are Claude Code's own aliases, and the OpenAI ones are resolved when
-  // used (shared/model-aliases.js). "Other" types an exact model name. The Claude and ChatGPT subscriptions can also
+  // ones are Claude Code's own aliases; the OpenAI ones are tiers (Sol, Luna,
+  // whatever tiers exist) read from the live model list and resolved to the
+  // newest model of the tier when used (shared/model-aliases.js). "Other"
+  // types an exact model name. The Claude and ChatGPT subscriptions can also
   // leave the choice to their own default; the API key needs a model.
-  const OPENAI_PRESETS = [
-    ["sol", "Sol"],
-    ["astra", "Astra"],
-    ["luna", "Luna"],
+  const CLAUDE_PRESETS = [
+    ["", "Default"],
+    ["sonnet", "Sonnet"],
+    ["opus", "Opus"],
+    ["haiku", "Haiku"],
   ];
-  const MODEL_PRESETS = {
-    claude: [
-      ["", "Default"],
-      ["sonnet", "Sonnet"],
-      ["opus", "Opus"],
-      ["haiku", "Haiku"],
-    ],
-    chatgpt: [["", "Default"], ...OPENAI_PRESETS],
-    openai: OPENAI_PRESETS,
-  };
+  // Only shown until a live list is read (no key yet, no helper, offline).
+  const FALLBACK_TIERS = ["sol", "astra", "terra", "luna"];
+  const liveTiers = {}; // provider -> the tiers its live model list has
+  const tiersAskedAt = {}; // provider -> when the list was last asked for
+
+  const tierLabel = (tier) => tier.charAt(0).toUpperCase() + tier.slice(1);
+
+  // The tiers in a list of model IDs (gpt-<version>-<tier>), the ones with the
+  // newest models first. Same rule as shared/model-aliases.js's tiersFrom.
+  function tiersFrom(ids) {
+    const newest = new Map();
+    const cmp = (a, b) => {
+      for (let i = 0; i < Math.max(a.length, b.length); i += 1) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) - (b[i] || 0);
+      return 0;
+    };
+    for (const id of ids) {
+      const m = typeof id === "string" ? /^gpt-(\d+(?:\.\d+)*)-([a-z]+)$/.exec(id) : null;
+      if (!m) continue;
+      const version = m[1].split(".").map(Number);
+      if (!newest.has(m[2]) || cmp(version, newest.get(m[2])) > 0) newest.set(m[2], version);
+    }
+    return [...newest.entries()].sort((a, b) => cmp(b[1], a[1]) || a[0].localeCompare(b[0])).map(([tier]) => tier);
+  }
+
+  // What a provider's model dropdown offers right now.
+  function presetsFor(provider) {
+    if (provider === "claude") return CLAUDE_PRESETS;
+    if (provider !== "chatgpt" && provider !== "openai") return null;
+    // Both name their models the same way, so either's list tells the tiers.
+    const tiers = liveTiers[provider] || liveTiers.chatgpt || liveTiers.openai || FALLBACK_TIERS;
+    const list = tiers.map((tier) => [tier, tierLabel(tier)]);
+    return provider === "chatgpt" ? [["", "Default"], ...list] : list;
+  }
+
+  // Reads the live model list for the add row's provider, at most once a
+  // minute, and redraws the dropdown with the tiers it has. The ChatGPT
+  // subscription's list is the Codex CLI's own catalog, asked of the helper;
+  // an API key's is OpenAI's, asked of the worker with the saved key.
+  async function loadTiers(provider) {
+    if (provider !== "chatgpt" && provider !== "openai") return;
+    if (Date.now() - (tiersAskedAt[provider] || 0) < 60000) return;
+    tiersAskedAt[provider] = Date.now();
+    let ids = [];
+    try {
+      if (provider === "chatgpt") {
+        const res = await rpc("models", { provider: "chatgpt" }, 25000);
+        if (res.ok) ids = res.result.models || [];
+      } else {
+        const res = await worker("lc-tutor:settings-models", { provider: "openai" });
+        if (res.ok) ids = res.result.models || [];
+      }
+    } catch {
+      ids = [];
+    }
+    const tiers = tiersFrom(ids);
+    if (!tiers.length) return;
+    liveTiers[provider] = tiers;
+    if (addOpen || draftProfiles.length === 0) renderAddRow();
+  }
 
   // A dropdown of a provider's models, keeping a name typed earlier, with
   // "Other" to type one.
   function presetSelect(provider, value, attrs, flag) {
-    const presets = MODEL_PRESETS[provider];
+    const presets = presetsFor(provider);
     const select = h("select", { ...attrs, onchange: () => {
       if (select.value === OTHER) {
         typeModelByHand[flag] = true;
@@ -1133,7 +1185,8 @@
   // A Claude alias is shown by its friendly name (the dropdown's), as the
   // Tutor tab's menu shows it (shared/profiles.js keeps the same names).
   function modelName(provider, model) {
-    const preset = (MODEL_PRESETS[provider] || []).find(([v]) => v && v === model);
+    if ((provider === "openai" || provider === "chatgpt") && /^[a-z]+$/.test(model)) return tierLabel(model);
+    const preset = provider === "claude" ? CLAUDE_PRESETS.find(([v]) => v && v === model) : null;
     return preset ? preset[1] : model;
   }
 
@@ -1416,6 +1469,9 @@
       );
       return;
     }
+    // The tiers on offer come from the live model list; the dropdown redraws
+    // when it arrives.
+    loadTiers(addProvider);
     const select = h("select", {
       id: "add-provider",
       onchange: () => {
@@ -1429,8 +1485,8 @@
     if (addProvider === "local" && !typeModelByHand.add) {
       // "Other" in this dropdown types a name here, not in the card.
       model = modelSelect("local", keepModel && (foundModels.local || []).includes(keepModel) ? keepModel : "", { id: "add-model", autocomplete: "off", spellcheck: "false" }, "add");
-    } else if (MODEL_PRESETS[addProvider] && !typeModelByHand.add) {
-      const presets = MODEL_PRESETS[addProvider];
+    } else if (presetsFor(addProvider) && !typeModelByHand.add) {
+      const presets = presetsFor(addProvider);
       model = presetSelect(addProvider, keepModel && presets.some(([v]) => v === keepModel) ? keepModel : "", { id: "add-model", autocomplete: "off", spellcheck: "false" }, "add");
     } else {
       const required = catalog[addProvider].requires.includes("model");

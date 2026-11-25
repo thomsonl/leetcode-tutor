@@ -769,6 +769,23 @@ await scenario('the Claude subscription: a saved alias is shown by its friendly 
   await page.screenshot(path.join(shots, 'claude-model-dark.png'), { scheme: 'dark' });
 });
 
+await scenario('the ChatGPT dropdown lists the tiers of the live model list, including ones that did not exist when this was written', companion({
+  models: ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-9-zenith', 'gpt-reserve', 'codex-auto-review'],
+}), async (page) => {
+  await openAdd(page);
+  await page.eval(`(() => { const s = document.getElementById('add-provider'); s.value = 'chatgpt'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await page.waitFor(`[...document.getElementById('add-model').options].some((o) => o.textContent === 'Zenith')`, { what: 'the live tiers', timeout: 15000 });
+  assert.deepEqual(await page.eval(`[...document.getElementById('add-model').options].map((o) => o.textContent)`), ['Default', 'Zenith', 'Astra', 'Sol', 'Terra', 'Luna', 'Other (type a name)...']);
+  assert.equal(lastCall(page, 'models').body.params.provider, 'chatgpt');
+  // The OpenAI key's dropdown names the same tiers.
+  await page.eval(`(() => { const s = document.getElementById('add-provider'); s.value = 'openai'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  assert.deepEqual(await page.eval(`[...document.getElementById('add-model').options].map((o) => o.textContent)`), ['Zenith', 'Astra', 'Sol', 'Terra', 'Luna', 'Other (type a name)...']);
+  // A tier chosen is saved as the tier (the newest of it is found when it runs), named plainly.
+  await page.eval(`(() => { const s = document.getElementById('add-model'); s.value = 'zenith'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await page.click('#add-profile-button');
+  assert.equal((await profileRows(page)).find((r) => r.isDefault).name, 'Zenith');
+});
+
 // ---- live: the real relay and companion ------------------------------------------
 
 function stubModel(name) {

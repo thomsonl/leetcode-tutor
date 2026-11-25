@@ -316,7 +316,7 @@ try {
     // The OpenAI models are a dropdown, as the Claude ones are.
     await options.eval(`(() => { const p = document.getElementById('add-provider') || (document.getElementById('add-toggle').click(), document.getElementById('add-provider')); p.value = 'openai'; p.dispatchEvent(new Event('change', { bubbles: true })); })()`);
     const names = await options.eval(`[...document.getElementById('add-model').options].map((o) => o.textContent)`);
-    check(JSON.stringify(names) === JSON.stringify(['Sol', 'Astra', 'Luna', 'Other (type a name)...']), `OpenAI models: ${JSON.stringify(names)}`);
+    check(JSON.stringify(names) === JSON.stringify(['Sol', 'Astra', 'Terra', 'Luna', 'Other (type a name)...']), `OpenAI models: ${JSON.stringify(names)}`);
     const providers = await options.eval(`[...document.getElementById('add-provider').options].map((o) => o.textContent)`);
     check(providers[providers.length - 1] === 'Local model', `Local model is last: ${JSON.stringify(providers)}`);
   });

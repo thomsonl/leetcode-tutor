@@ -26,7 +26,7 @@ import {
   saveSettings,
   statusSummary,
 } from './settings.js';
-import { checkCodexLogin } from './codex-backend.js';
+import { checkCodexLogin, listCodexModels } from './codex-backend.js';
 import { isSignInError, signInMessage } from './sign-in.js';
 import { PROFILE_ID_RE, findProfile } from '../extension/shared/profiles.js';
 import { CONNECTION_TEST_PROMPT as TEST_PROMPT, MODES, normalizeMode } from '../extension/shared/tutor-prompt.js';
@@ -213,6 +213,12 @@ export function createSettingsRpc(deps) {
 
   // Lists model names a server offers, for the model field's suggestions.
   async function models({ provider, baseUrl, apiKey }) {
+    // The ChatGPT subscription has no server address: its models are the
+    // Codex CLI's own catalog.
+    if (provider === 'chatgpt') {
+      const ids = await (deps.listCodexModels || (() => listCodexModels({ command: deps.codexCommand || 'codex', env: deps.env })))();
+      return ids.length ? { models: ids } : { models: [], message: "Couldn't read the Codex CLI's model list." };
+    }
     const stored = deps.getStored();
     const id = PROVIDERS[provider] ? provider : 'local';
     const draft = applyPatch(stored, {
