@@ -553,16 +553,16 @@
         body.appendChild(
           h(
             "div",
-            { class: "helper-row" },
-            h("span", { class: "result", id: "helper-check-note", role: "status", "aria-live": "polite", text: helperChecking ? "Looking for the helper..." : helperCheckNote || "" }),
-            h("div", { class: "helper-buttons" }, h("button", {
+            { class: "helper-row helper-check" },
+            h("button", {
               type: "button",
               id: "helper-check",
               class: "btn",
               text: helperChecking ? "Checking..." : "Check again",
               disabled: helperChecking,
               onclick: checkHelperAgain,
-            }))
+            }),
+            h("span", { class: "result", id: "helper-check-note", role: "status", "aria-live": "polite", text: helperChecking ? "Looking for the helper..." : helperCheckNote || "" })
           )
         );
       }
@@ -570,6 +570,8 @@
         body.appendChild(h("details", { class: "helper-uninstall" }, h("summary", { text: "Uninstall" }), commandRow(`npx ${HELPER_PACKAGE} uninstall`, "uninstall")));
       }
     }
+    // Until the first answer, say so instead of showing an empty card.
+    if (!helperInfo && !body.firstChild) body.appendChild(h("p", { class: "hint", text: "Looking for the helper..." }));
     const error = helperErrorText();
     $("helper-error").hidden = !error;
     $("helper-error").textContent = error || "";
