@@ -3780,6 +3780,12 @@
     });
   }
 
+  // Asks the worker to send the helper the saved models, for at most a few
+  // seconds; whether it was done.
+  function syncWithTimeout() {
+    return Promise.race([workerRequest("sync-helper-profiles", {}).then((r) => Boolean(r && r.ok), () => false), new Promise((resolve) => setTimeout(() => resolve(false), 8000))]);
+  }
+
   function workerSwitch(id) {
     return workerRequest("switch-profile", { id });
   }
@@ -3900,7 +3906,7 @@
     // The relay stopped waiting, but the companion may still switch.
     if (res.status === 504) return { ok: false, unsettled: true };
     const message = body && body.error && typeof body.error.message === "string" ? body.error.message : "Couldn't switch models.";
-    return { ok: false, message };
+    return { ok: false, message, code: body && body.error ? body.error.code : undefined };
   }
 
   function showHint(text) {
@@ -3933,6 +3939,11 @@
       if (followUp || (entry.runtime === "helper" && transport === relayTransport)) {
         try {
           result = await relaySwitch(id);
+          // The helper keeps its own copy of the saved models, which can lag
+          // behind the menu's: send it the list and try once more.
+          if (!result.ok && result.code === "unknown" && (await syncWithTimeout())) {
+            result = await relaySwitch(id);
+          }
         } catch {
           result = { ok: false, unsettled: true };
         }

@@ -162,6 +162,8 @@ try {
     // The highlight slides slowly: partway after a moment, under the chosen option once it is done.
     const thumb = () => page.eval(`(() => { const t = window.__q('.mode-thumb'); const b = window.__qa('.mode-opt')[1]; return { left: parseFloat(getComputedStyle(t).left), target: b.offsetLeft, ready: t.hasAttribute('data-ready') }; })()`);
     check((await thumb()).ready, 'the highlight is set up to animate');
+    const fit = await page.eval(`(() => window.__qa('.mode-opt').map((b) => { const r = document.createRange(); r.selectNodeContents(b); const t = r.getBoundingClientRect(); const bb = b.getBoundingClientRect(); return { text: b.textContent, textTop: t.top - bb.top, textBottom: bb.bottom - t.bottom, textLeft: t.left - bb.left, textRight: bb.right - t.right, scroll: [b.scrollWidth - b.clientWidth, b.scrollHeight - b.clientHeight] }; }))()`);
+    check(fit.every((f) => f.textTop >= 0 && f.textBottom >= 0 && f.textLeft >= 0 && f.textRight >= 0 && f.scroll[0] <= 0 && f.scroll[1] <= 0), `a mode label is clipped: ${JSON.stringify(fit)}`);
     await page.waitFor(`(() => { const t = window.__q('.mode-thumb'); return Math.abs(parseFloat(getComputedStyle(t).left) - window.__qa('.mode-opt')[1].offsetLeft) < 0.5; })()`, { what: 'the highlight under Interviewer', timeout: 3000 });
     await page.waitFor(`window.__feed().length === 1 && window.__feed()[0].startsWith('empty:')`, { what: 'the empty feed' });
     const feed = await page.eval('window.__feed()');

@@ -97,6 +97,8 @@ try {
     const port = {
       postMessage: (m) => {
         window.__posted.push(JSON.parse(JSON.stringify(m)));
+        // The worker's answer to a request to send the helper its model list.
+        if (m.type === 'sync-helper-profiles') setTimeout(() => window.__toPanel({ type: 'switch-result', reqId: m.reqId, ok: Boolean(window.__syncOk), code: 'offline' }), 0);
         if (m.type === 'subscribe') {
           window.__toPanel({ type: 'event', event: { type: 'config', provider: 'local', label: 'Local model', model: 'gpt-oss:20b', epoch: 'w1' } });
           window.__toPanel({ type: 'event', event: { type: 'status', companionOnline: true, busy: false, epoch: 'w1', openTurns: [] } });
@@ -381,6 +383,20 @@ try {
     await clickAt('.opt[data-id="sonnet"]');
     await page.waitFor(`!window.__q('.hint').hidden`, { what: 'the refusal' });
     check(/does not have that model saved/.test(await page.eval(`window.__q('.hint').textContent`)), 'refusal shown');
+    // A model the helper's copy lacks (saved a moment ago): the list is sent to it and the switch tried again.
+    await page.eval(`(() => { window.__syncOk = true; window.__switchStatus = 200; window.__switchBody = { ok: true, profile: 'sonnet', active: { provider: 'claude', label: 'Claude subscription', model: 'sonnet' } }; window.__switchQueue = [{ status: 404, body: { ok: false, error: { code: 'unknown', message: 'The helper app does not have that model saved.' } } }]; window.__switches = []; })()`);
+    await clickAt('button.model');
+    await clickAt('.opt[data-id="sonnet"]');
+    await page.waitFor(`window.__switches.length === 2`, { what: 'the second try' });
+    check(await page.eval(`window.__posted.some((m) => m.type === 'sync-helper-profiles')`), 'the worker was asked to send the helper its list');
+    await page.waitFor(`window.__q('.hint').hidden`, { what: 'no refusal shown' });
+    // Back on haiku for what follows.
+    await page.eval(`(() => { window.__switchBody = { ok: true, profile: 'haiku', active: { provider: 'claude', label: 'Claude subscription', model: 'claude-haiku-5-5' } }; })()`);
+    await clickAt('button.model');
+    await clickAt('.opt[data-id="haiku"]');
+    await page.waitFor(`window.__q('button.model').textContent === 'Haiku, the quick one with a long name'`, { what: 'back on haiku' });
+    await page.eval(`window.__posted.length = 0`);
+    await page.eval(`(() => { window.__syncOk = false; window.__switchStatus = 404; window.__switchBody = { ok: false, error: { code: 'unknown', message: 'The helper app does not have that model saved.' } }; })()`);
     // With the helper's tutor offline, its models cannot be chosen.
     await page.eval(`window.__event({ type: 'status', companionOnline: false, busy: false, epoch: 'r1', openTurns: [] })`);
     await settle();

@@ -106,6 +106,9 @@
         window.__switches = window.__switches || [];
         window.__switches.push(JSON.parse(options.body));
         await new Promise((r) => setTimeout(r, window.__switchDelayMs || 0));
+        // __switchQueue answers one call each ([{ status, body }]) before the fixed answer.
+        const queued = (window.__switchQueue || []).shift();
+        if (queued) return new Response(JSON.stringify(queued.body), { status: queued.status, headers: { "Content-Type": "application/json" } });
         return new Response(JSON.stringify(window.__switchBody || { ok: true }), { status: window.__switchStatus || 200, headers: { "Content-Type": "application/json" } });
       }
       // The mode switch's helper path: answers __modeStatus with __modeBody

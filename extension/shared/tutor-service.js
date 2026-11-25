@@ -303,6 +303,28 @@ export function createTutorService({
     return { ok: true, runtime: result.runtime };
   }
 
+  // Tells the helper's companion the saved models that run through it. The
+  // menu lists the extension's saved models, but the companion keeps its own
+  // copy (sent when settings are saved, and only while it runs), so a model
+  // saved a moment ago, or while the helper was down, may be missing there and
+  // a switch to it is refused. The panel asks for this and tries again.
+  async function syncHelperProfiles() {
+    const profiles = settings.profiles.filter((profile) => profileEntry(settings, profile).runtime === 'helper');
+    let res;
+    try {
+      res = await fetch('http://localhost:8135/settings/rpc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ method: 'setProfiles', params: { profiles } }),
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch {
+      return { ok: false, code: 'offline', message: "The helper app isn't running." };
+    }
+    return res.ok ? { ok: true } : { ok: false, code: 'failed', message: "The helper app didn't take the model list." };
+  }
+
   // The mode switch (Tutor or Interviewer), a setting of its own like the
   // active profile: only the mode changes. When the tutor runs here, the new
   // backend goes in through the engine's turn queue and the conversation
@@ -541,6 +563,12 @@ export function createTutorService({
           } else if (message.type === 'switch-profile') {
             const reqId = message.reqId;
             switchProfile(typeof message.id === 'string' ? message.id : '').then(
+              (result) => post({ type: 'switch-result', reqId, ...result }),
+              (err) => post({ type: 'switch-result', reqId, ok: false, code: 'failed', message: scrub(err.message, Object.values(secrets)) })
+            );
+          } else if (message.type === 'sync-helper-profiles') {
+            const reqId = message.reqId;
+            syncHelperProfiles().then(
               (result) => post({ type: 'switch-result', reqId, ...result }),
               (err) => post({ type: 'switch-result', reqId, ok: false, code: 'failed', message: scrub(err.message, Object.values(secrets)) })
             );
