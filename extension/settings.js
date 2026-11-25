@@ -33,10 +33,6 @@
     contextTokens: "Context window (tokens)",
     apiKey: "API key",
   };
-  const RUNTIME_LABELS = {
-    extension: "In the browser",
-    helper: "Through the helper app",
-  };
   const ANTHROPIC_ORIGIN = "https://api.anthropic.com/*";
 
   // The provider catalog, the same one the companion uses
@@ -482,6 +478,8 @@
 
     const body = $("helper-body");
     body.textContent = "";
+    // A "still too old" note is stale once the helper is new enough.
+    if (helperInfo && !helperInfo.helperOld && /^Still version/.test(helperCheckNote || "")) helperCheckNote = null;
     const setup = nativeSetup();
     if (setup === "pending" || setup === "page-reload") {
       body.appendChild(
@@ -535,16 +533,20 @@
         )
       );
     } else if (helperInfo) {
+      let hasUpdateRow = false;
       const installed = helperInfo.state === "running" || helperProbe === "installed";
       if (!installed) {
         body.appendChild(h("p", { class: "hint", text: "Run this in a terminal, then press Check again:" }));
         body.appendChild(commandRow(installCommand(), "install"));
       } else {
         const updates = updateBlock();
+        hasUpdateRow = Boolean(updates) && !helperInfo.helperOld && Boolean(helperInfo.host && helperInfo.host.update);
         if (updates) body.appendChild(updates);
         else if (helperInfo.state !== "running") body.appendChild(h("p", { class: "hint", text: "Starts when you open a problem." }));
       }
-      if (!installed || helperInfo.state !== "running") {
+      // "Check for updates" already re-reads a running helper; otherwise (not
+      // running, too old to update itself) this is how to see if a command worked.
+      if (!hasUpdateRow) {
         body.appendChild(
           h(
             "div",
@@ -601,7 +603,12 @@
       const left = 500 - (Date.now() - started);
       if (left > 0) await new Promise((resolve) => setTimeout(resolve, left));
       helperChecking = false;
-      if (helper && helperInfo && helperInfo.state === "running") helperCheckNote = "The helper is running.";
+      const version = helperInfo && helperInfo.host && helperInfo.host.version;
+      if (helper && helperInfo && helperInfo.state === "running") {
+        helperCheckNote = helperInfo.helperOld
+          ? `Still version ${version}, which is too old. It restarts about 30 seconds after you close the last LeetCode tab. Check again then.`
+          : `Running${version ? `, version ${version}` : ""}.`;
+      }
       else if (helperInfo && (helperInfo.state === "not-installed" || helperProbe === "not-installed")) helperCheckNote = "Not installed yet.";
       else if (helperProbe === "installed" || (helperInfo && helperInfo.state === "running")) helperCheckNote = "Installed, not answering yet. Try again.";
       else helperCheckNote = "Could not reach the helper. See the message below.";
@@ -885,54 +892,17 @@
     return wrap;
   }
 
-  // Where the tutor runs for a provider: a choice for those that can run in
-  // the browser, a note for those that need the helper.
-  function runtimeRow(id) {
-    const options = runtimesOf(id);
-    if (options.length === 1) {
-      return h("p", { class: "hint runtime-note", text: "Runs through the helper app." });
-    }
-    const group = h("div", { class: "runtime", role: "radiogroup", "aria-label": "Where the tutor runs" });
-    for (const runtime of options) {
-      const inputId = `${id}-runtime-${runtime}`;
-      group.appendChild(
-        h(
-          "label",
-          { class: "runtime-option", for: inputId },
-          h("input", {
-            type: "radio",
-            id: inputId,
-            name: `${id}-runtime`,
-            value: runtime,
-            checked: runtimeOf(id) === runtime,
-            onchange: () => {
-              runtimeChoice[id] = runtime;
-              render();
-              clearResults();
-              if (runtime === "helper" && !helper) loadHelper();
-              saveSoon();
-            },
-          }),
-          h("span", { text: RUNTIME_LABELS[runtime] }),
-          h("span", { class: "opt", text: runtime === "extension" ? " (nothing to install)" : " (the companion)" })
-        )
-      );
-    }
-    return h("div", { class: "field" }, h("span", { class: "label", text: "Where the tutor runs" }), group);
-  }
-
   // The connection settings of the selected model's provider. Only that
   // provider is drawn: the others are reached by adding a model for them.
   function providerCard(id) {
     const spec = catalog[id];
-    // Named by the selected model, since these are its connection settings
-    // (the model's provider shares them with its other models).
-    const chosen = draftProfiles.find((p) => p.id === draftActive);
-    const named = chosen ? `Settings for ${profileName(chosen)}` : `${spec.label} settings`;
-    const title = h("div", { class: "provider-title" }, named, id === "chatgpt" ? h("span", { class: "tag", text: "Experimental" }) : null);
-    const head = h("div", { class: "provider-head" }, h("div", {}, title, id === "claude" || id === "chatgpt" ? h("div", { class: "provider-hint", text: spec.hint }) : null));
+    // The sign-in step for the subscriptions; nothing else needs a heading.
+    const needsSignIn = id === "claude" || id === "chatgpt";
+    const head = needsSignIn
+      ? h("div", { class: "provider-head" }, h("div", { class: "provider-hint", text: spec.hint }), id === "chatgpt" ? h("span", { class: "tag", text: "Experimental" }) : null)
+      : null;
     const modelLock = isLocked(id, "model") ? lockNote("model") : null;
-    const fields = h("div", { class: "fields" }, runtimeRow(id), ...spec.fields.filter((f) => f !== "model").map((f) => fieldFor(id, f)), modelLock);
+    const fields = h("div", { class: "fields" }, ...spec.fields.filter((f) => f !== "model").map((f) => fieldFor(id, f)), modelLock);
     return h("div", { class: "provider", "data-selected": true }, head, fields);
   }
 
@@ -1147,7 +1117,6 @@
     const model = profile.model || defaultModelOf(profile.provider);
     const shown = model ? modelName(profile.provider, model) : null;
     if (shown && shown !== profileName(profile)) parts.push(shown);
-    parts.push(runtimeOf(profile.provider) === "helper" ? "through the helper app" : "in the browser");
     return parts.join(" · ");
   }
 
@@ -1880,13 +1849,7 @@
       h("button", { type: "button", id: "prompt-reset", class: "btn", text: "Reset to default", onclick: () => savePrompt(mode, true) }),
       h("p", { id: "prompt-result", class: "result", role: "status", "aria-live": "polite" })
     );
-    const fixed = h(
-      "details",
-      { class: "prompt-fixed" },
-      h("summary", { text: "Fixed rules" }),
-      h("pre", { text: ext.settings.promptFixed || "" })
-    );
-    $("prompts-body").replaceChildren(tabs, intro, area, meta, actions, fixed);
+    $("prompts-body").replaceChildren(tabs, intro, area, meta, actions);
     updatePromptMeta();
   }
 

@@ -183,10 +183,12 @@ const until = async (check, what, ms = 10000) => {
   }
   throw new Error(`timed out waiting for ${what}`);
 };
-const selectedProvider = (page) => page.eval(`(document.querySelector('#providers .provider-title') || {}).textContent`);
+// The selected provider: its row's meta starts with its name, and with no
+// row yet the header names it ("Not saved yet: Claude subscription").
+const selectedProvider = (page) => page.eval(`(() => { const meta = document.querySelector('#profiles .profile[data-default] .profile-meta'); return meta ? meta.textContent.split(' · ')[0] : document.getElementById('connection-text').textContent.replace(/^[^:]*: /, '').split(',')[0]; })()`);
 
 await scenario('first run shows the historic default (Claude subscription) and the running provider', companion(), async (page) => {
-  assert.equal(await selectedProvider(page), 'Claude subscription settings');
+  assert.equal(await selectedProvider(page), 'Claude subscription');
   // The page carries the store name (the manifest's), in its heading and tab title.
   assert.equal(await text(page, 'h1'), "Thomson's LeetCode Tutor");
   assert.equal(await page.eval('document.title'), "Thomson's LeetCode Tutor settings");
@@ -221,10 +223,10 @@ await scenario('a saved local model fills the form, and "Find models" suggests w
   await page.screenshot(path.join(shots, 'local-light.png'), { scheme: 'light' });
 });
 
-await scenario('typing an API key tests and saves it, sends only the chosen provider, and never shows it back', companion(), async (page) => {
+await scenario('typing an API key tests and saves it, sends only the chosen provider, and never shows it back', companion({ stored: applyPatch(emptySettings(), { provider: 'anthropic' }) }), async (page) => {
   const secret = 'sk-ant-TYPED-SECRET-1234567890';
-  await useProvider(page, 'anthropic');
-  await page.click('#anthropic-runtime-helper');
+  // A setup that already runs through the helper stays on it; a change saves the form.
+  await leave(page, '#autoClearContext');
   await page.waitFor(`/Enter the Anthropic API key/.test(document.getElementById('save-result').textContent)`, { what: 'the note that the key is missing' });
   assert.equal(savedCalls(page, 'save'), 0, 'nothing is saved before the key is there');
   await page.type('#anthropic-apiKey', secret);
@@ -276,7 +278,7 @@ await scenario('environment variables lock their fields and are never sent back 
 }), async (page) => {
   assert.equal(await page.eval(`document.getElementById('local-model')`), null, 'no model picker in the card');
   assert.match(await text(page, '#providers'), /Set by COMPANION_MODEL in your environment/);
-  assert.equal(await page.eval(`document.getElementById('local-runtime-helper').checked`), true, 'an existing helper setup stays on the helper');
+  assert.equal(await page.eval(`document.getElementById('helper-card').hidden`), false, 'an existing helper setup stays on the helper');
   assert.equal(await page.eval(`document.getElementById('vaultAutoSummary').disabled`), true);
   // The locked option is not editable, so the change that saves is another field's.
   await page.type('#local-contextTokens', '16384');
@@ -289,9 +291,8 @@ await scenario('environment variables lock their fields and are never sent back 
   await page.screenshot(path.join(shots, 'locked-dark.png'), { scheme: 'dark' });
 });
 
-await scenario('a refused save shows the reason, marks the offending field and leaves focus alone', companion({ saveError: { message: 'model can\'t be empty', field: 'model' } }), async (page) => {
-  await useProvider(page, 'local', 'qwen3:8b');
-  await page.click('#local-runtime-helper');
+await scenario('a refused save shows the reason, marks the offending field and leaves focus alone', companion({ stored: applyPatch(emptySettings(), { provider: 'local', providers: { local: { model: 'qwen3:8b' } } }), saveError: { message: 'model can\'t be empty', field: 'model' } }), async (page) => {
+  await leave(page, '#autoClearContext');
   await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Not saved')`);
   assert.equal(await text(page, '#save-result'), 'Not saved. Model can\'t be empty');
   assert.equal(await page.eval(`document.getElementById('save-result').getAttribute('data-kind')`), 'error');
@@ -414,7 +415,7 @@ for (const [status, pattern, kind] of [
   await scenario(`offline: ${kind}`, companion({ httpStatus: status }), async (page) => {
     // With no helper, a fresh page starts on a local model in the browser,
     // which needs no helper: nothing is disabled and no warning shows.
-    assert.equal(await selectedProvider(page), 'Local model settings');
+    assert.equal(await page.eval(`Boolean(document.getElementById('local-baseUrl'))`), true, 'the Local model fields are shown');
     assert.equal(await page.eval(`document.getElementById('offline').hidden`), true);
     assert.equal(await page.eval(`document.getElementById('form').hasAttribute('data-disabled')`), false);
     await useProvider(page, 'claude');
@@ -481,8 +482,8 @@ function stubServer({ status = 200 } = {}) {
 {
   const model = await stubServer();
   await scenario('browser runtime: with no helper, a local model is set up, tested and saved without the relay', null, async (page) => {
-    assert.equal(await selectedProvider(page), 'Local model settings');
-    assert.equal(await page.eval(`document.getElementById('local-runtime-extension').checked`), true);
+    assert.equal(await page.eval(`Boolean(document.getElementById('local-baseUrl'))`), true, 'the Local model fields are shown');
+    assert.equal(await page.eval(`document.getElementById('helper-card').hidden`), true);
     assert.equal(await text(page, '#connection-text'), 'Not set up');
     assert.equal(await page.eval(`document.getElementById('offline').hidden`), true, 'no helper warning');
     assert.match(await text(page, '#providers'), /OLLAMA_ORIGINS=chrome-extension:\/\//);
@@ -515,7 +516,7 @@ function stubServer({ status = 200 } = {}) {
 await scenario('browser runtime: an Anthropic key is saved in extension storage only, and never shown back', null, async (page) => {
   const secret = 'sk-ant-BROWSER-SECRET-0987654321';
   await useProvider(page, 'anthropic');
-  assert.equal(await page.eval(`document.getElementById('anthropic-runtime-extension').checked`), true);
+  assert.equal(await page.eval(`document.getElementById('helper-card').hidden`), true);
   await page.type('#anthropic-apiKey', secret);
   await leave(page, '#anthropic-apiKey');
   await page.waitFor(SAVED, { what: 'the save' });
@@ -598,7 +599,7 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
     await page.waitFor(SAVED, { what: 'the first save', timeout: 20000 });
     let rows = await profileRows(page);
     assert.deepEqual(rows.map((r) => [r.name, r.isDefault]), [['qwen3:8b', true]], 'the first save makes one default model');
-    assert.equal(rows[0].meta, 'Local model · in the browser');
+    assert.equal(rows[0].meta, 'Local model');
 
     // Add a second local model from the same dropdown of the server's models, with a name.
     assert.equal(await page.eval(`document.getElementById('add-provider')`), null, 'the add row is behind a button once there is a model');
@@ -623,7 +624,7 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
     await page.click('#add-profile-button');
     rows = await profileRows(page);
     assert.deepEqual(rows.map((r) => r.name), ['qwen3:8b', 'Gemma', 'claude-opus-5-5']);
-    assert.equal(rows[1].meta, 'Local model · gemma4:26b · in the browser');
+    assert.equal(rows[1].meta, 'Local model · gemma4:26b');
     // The Anthropic model has no key yet, so it is not saved: the page says what is missing.
     await page.waitFor(`/Enter the Anthropic API key/.test(document.getElementById('save-result').textContent)`, { what: 'the note that the key is missing' });
     assert.equal((await browser.serviceWorkerEval(`chrome.storage.local.get(null)`)).tutorSettings.profiles.length, 2, 'and the saved list is unchanged');
@@ -722,8 +723,8 @@ await scenario('models card: subscription models are kept by the helper too, and
   await page.click('#add-profile-button');
   rows = await profileRows(page);
   assert.deepEqual(rows.map((r) => r.name), ['claude-haiku-5-5', 'Sonnet', 'llama3.2']);
-  assert.match(rows[1].meta, /through the helper app/);
-  assert.match(rows[2].meta, /in the browser/);
+  assert.equal(rows[1].meta, 'Claude subscription · Sonnet (latest)');
+  assert.equal(rows[2].meta, 'Local model');
   // The adds saved themselves (two quick ones in one save) and the last one,
   // the browser model, became the default; the helper is told only its own list.
   await page.waitFor(`document.getElementById('connection-text').textContent.includes('llama3.2')`, { what: 'the browser model saved and running', timeout: 20000 });

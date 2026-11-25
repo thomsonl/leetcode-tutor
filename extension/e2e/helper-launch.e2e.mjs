@@ -530,9 +530,9 @@ try {
     }
     check(target, 'the options page did not open');
     options3 = await browser3.attachPage((url) => url === target.url);
-    await options3.waitFor(`document.querySelector('#providers .provider-title')`, { what: 'Claude chosen again', timeout: 10000 }).catch(async (err) => {
+    await options3.waitFor(`document.querySelector('#providers .provider')`, { what: 'Claude chosen again', timeout: 10000 }).catch(async (err) => {
       // Say what the reopened page held, so a timeout is diagnosable.
-      const seen = await options3.eval(`JSON.stringify({ title: (document.querySelector('#providers .provider-title') || {}).textContent, note: document.getElementById('save-result') && document.getElementById('save-result').textContent, helper: document.getElementById('helper-state-text') && document.getElementById('helper-state-text').textContent, ready: document.readyState })`).catch((e) => String(e));
+      const seen = await options3.eval(`JSON.stringify({ title: (document.querySelector('#providers .provider-hint') || {}).textContent, note: document.getElementById('save-result') && document.getElementById('save-result').textContent, helper: document.getElementById('helper-state-text') && document.getElementById('helper-state-text').textContent, ready: document.readyState })`).catch((e) => String(e));
       const stored = await options3.eval(`chrome.storage.local.get(null).then((v) => JSON.stringify({ resume: v.settingsResume, reload: v.nativeReload }))`).catch((e) => String(e));
       throw new Error(`${err.message}: page ${seen}, storage ${stored}, console ${(options3.console || []).join(' | ')}`);
     });

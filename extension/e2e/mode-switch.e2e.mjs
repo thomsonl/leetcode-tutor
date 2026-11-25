@@ -231,8 +231,7 @@ try {
     check(ui.text === DEFAULT_PROMPTS.tutor, 'the editor holds the default tutor prompt');
     check(ui.state === 'Default prompt' && !ui.save && !ui.reset, JSON.stringify(ui));
     check(ui.tabs === 'Tutor* | Interviewer', ui.tabs);
-    const fixed = await settings.eval(`document.querySelector('.prompt-fixed pre').textContent`);
-    check(fixed === FIXED_RULES, 'the fixed rules are shown read-only');
+    check(await settings.eval(`!document.querySelector('.prompt-fixed')`), 'no fixed-rules section is shown');
     await settings.eval(`document.getElementById('prompts-card').scrollIntoView({ block: 'start' })`);
     await wait(200);
     await settings.screenshot(path.join(shots, 'settings-prompts.png'), { width: 1100, height: 900 });

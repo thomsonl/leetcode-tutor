@@ -157,7 +157,7 @@ try {
     const options = await openOptions(browser);
     allPages.push(options);
     await options.waitFor(`document.getElementById('connection-text').textContent === 'Not set up'`, { what: '"Not set up"' });
-    check(/^Local model settings/.test(await options.eval(`document.querySelector('#providers .provider-title').textContent`)), 'Local model is not the first choice');
+    check(await options.eval(`!document.querySelector('#providers .provider-hint')`), 'Claude subscription (its sign-in hint) is not the first choice');
     const providers = await options.eval(`document.getElementById('providers').textContent`);
     check(providers.includes(`OLLAMA_ORIGINS=chrome-extension://${browser.extensionId}`), 'the hint does not carry this extension id');
     await options.screenshot(path.join(shots, 'options-first-run-dark.png'), { width: 1280, height: 900 });

@@ -96,10 +96,6 @@ h2 { margin: 0 0 4px; font-size: 16px; line-height: 24px; font-weight: 600; }
 .field label { font-weight: 500; }
 .field .opt { font-weight: 400; color: var(--muted); }
 .field > .label { font-weight: 500; }
-.runtime { display: flex; flex-wrap: wrap; gap: 4px 20px; }
-.runtime-option { display: flex; align-items: center; gap: 6px; font-weight: 400; cursor: pointer; }
-.runtime-option input { margin: 0; accent-color: var(--green); }
-.runtime-option .opt { color: var(--muted); }
 
 .row { display: flex; gap: 8px; }
 .row input, .row select { flex: 1; min-width: 0; }
@@ -188,9 +184,6 @@ details.card > summary:focus-visible { outline-offset: 6px; border-radius: 6px; 
 .prompt-text[aria-invalid="true"] { border-color: var(--red); }
 .prompt-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--muted); font-size: 13px; line-height: 18px; }
 .prompt-meta .over { color: var(--red); }
-.prompt-fixed { margin-top: 12px; color: var(--muted); font-size: 13px; line-height: 18px; }
-.prompt-fixed summary { cursor: pointer; width: max-content; }
-.prompt-fixed pre { margin: 8px 0 0; padding: 10px 12px; border-radius: 6px; background: var(--fill); white-space: pre-wrap; overflow-wrap: anywhere; font: 400 12px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
 
 /* While a helper provider waits for the helper, what needs it is dimmed.
    The provider list stays usable (another provider may need no helper), the
