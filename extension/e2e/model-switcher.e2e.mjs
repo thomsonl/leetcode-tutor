@@ -97,6 +97,8 @@ try {
     const port = {
       postMessage: (m) => {
         window.__posted.push(JSON.parse(JSON.stringify(m)));
+        // The worker's answer to a request to send the helper its model list.
+        if (m.type === 'sync-helper-profiles') setTimeout(() => window.__toPanel({ type: 'switch-result', reqId: m.reqId, ok: Boolean(window.__syncOk), code: 'offline' }), 0);
         if (m.type === 'subscribe') {
           window.__toPanel({ type: 'event', event: { type: 'config', provider: 'local', label: 'Local model', model: 'gpt-oss:20b', epoch: 'w1' } });
           window.__toPanel({ type: 'event', event: { type: 'status', companionOnline: true, busy: false, epoch: 'w1', openTurns: [] } });
@@ -376,11 +378,25 @@ try {
     check(await page.eval(`window.__posted.some((m) => m.type === 'profile-switched' && m.id === 'haiku')`), 'the worker hears of it');
     check(!(await page.eval(`window.__posted.some((m) => m.type === 'switch-profile' && m.id === 'haiku')`)), 'not through the worker');
     // The companion refuses an id it does not have.
-    await page.eval(`(() => { window.__switchDelayMs = 0; window.__switchStatus = 404; window.__switchBody = { ok: false, error: { code: 'unknown', message: 'The helper app does not have that model saved. Open Manage models and press Save.' } }; })()`);
+    await page.eval(`(() => { window.__switchDelayMs = 0; window.__switchStatus = 404; window.__switchBody = { ok: false, error: { code: 'unknown', message: 'The helper app does not have that model saved. Open Settings and choose it there.' } }; })()`);
     await clickAt('button.model');
     await clickAt('.opt[data-id="sonnet"]');
     await page.waitFor(`!window.__q('.hint').hidden`, { what: 'the refusal' });
     check(/does not have that model saved/.test(await page.eval(`window.__q('.hint').textContent`)), 'refusal shown');
+    // A model the helper's copy lacks (saved a moment ago): the list is sent to it and the switch tried again.
+    await page.eval(`(() => { window.__syncOk = true; window.__switchStatus = 200; window.__switchBody = { ok: true, profile: 'sonnet', active: { provider: 'claude', label: 'Claude subscription', model: 'sonnet' } }; window.__switchQueue = [{ status: 404, body: { ok: false, error: { code: 'unknown', message: 'The helper app does not have that model saved.' } } }]; window.__switches = []; })()`);
+    await clickAt('button.model');
+    await clickAt('.opt[data-id="sonnet"]');
+    await page.waitFor(`window.__switches.length === 2`, { what: 'the second try' });
+    check(await page.eval(`window.__posted.some((m) => m.type === 'sync-helper-profiles')`), 'the worker was asked to send the helper its list');
+    await page.waitFor(`window.__q('.hint').hidden`, { what: 'no refusal shown' });
+    // Back on haiku for what follows.
+    await page.eval(`(() => { window.__switchBody = { ok: true, profile: 'haiku', active: { provider: 'claude', label: 'Claude subscription', model: 'claude-haiku-5-5' } }; })()`);
+    await clickAt('button.model');
+    await clickAt('.opt[data-id="haiku"]');
+    await page.waitFor(`window.__q('button.model').textContent === 'Haiku, the quick one with a long name'`, { what: 'back on haiku' });
+    await page.eval(`window.__posted.length = 0`);
+    await page.eval(`(() => { window.__syncOk = false; window.__switchStatus = 404; window.__switchBody = { ok: false, error: { code: 'unknown', message: 'The helper app does not have that model saved.' } }; })()`);
     // With the helper's tutor offline, its models cannot be chosen.
     await page.eval(`window.__event({ type: 'status', companionOnline: false, busy: false, epoch: 'r1', openTurns: [] })`);
     await settle();
@@ -391,6 +407,19 @@ try {
     check(!(await page.eval(`window.__q('button.model').hidden`)), 'the button stays, so another model can be chosen');
     await page.screenshot(path.join(SHOTS, '06-helper-offline-dark.png'), { width: 1100, height: 760 });
     await key('Escape');
+  });
+
+  await scenario('a helper on another model than the chosen one is asked once to take the chosen one', async () => {
+    await page.eval(`(() => { window.__switches = []; window.__switchStatus = 200; window.__switchQueue = []; window.__switchBody = { ok: true, profile: 'haiku', active: { provider: 'claude', label: 'Claude subscription', model: 'claude-haiku-5-5' } }; })()`);
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'sonnet', profile: 'sonnet', epoch: 'r1' })`);
+    await page.waitFor(`window.__switches.length === 1`, { what: 'the helper to be asked' });
+    check(await page.eval(`JSON.stringify(window.__switches)`) === '[{"id":"haiku"}]', 'it is asked for the chosen model');
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'sonnet', profile: 'sonnet', epoch: 'r1' })`);
+    await new Promise((r) => setTimeout(r, 500));
+    check(await page.eval(`window.__switches.length`) === 1, 'the same difference is not asked twice');
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'claude-haiku-5-5', profile: 'haiku', epoch: 'r1' })`);
+    await new Promise((r) => setTimeout(r, 300));
+    check(await page.eval(`window.__switches.length`) === 1, 'nothing is asked when the helper is on the chosen model');
   });
 
   await scenario('a helper switch the relay stopped waiting for is taken from the companion\'s next config event', async () => {
@@ -415,6 +444,91 @@ try {
     check(await page.eval(`window.__q('button.model').textContent`) === 'Sonnet', 'an unrelated config event changes nothing');
     check(!(await page.eval(`window.__posted.some((m) => m.type === 'profile-switched' && m.id === 'haiku' && window.__posted.indexOf(m) > window.__posted.findIndex((x) => x.type === 'profile-switched' && x.id === 'sonnet'))`)), 'nor tells the worker');
     await page.eval(`window.__switchStatus = 200`);
+  });
+
+  // ---- the Tutor | Interviewer switch through both transports -------------------
+  const modeText = () => page.eval(`window.__qa('.mode-opt').map((b) => b.textContent + (b.getAttribute('aria-pressed') === 'true' ? '*' : '') + (b.disabled ? '(off)' : '')).join(' ')`);
+
+  await scenario('the helper runtime: the mode switch goes through the relay as one word, and the worker hears of it', async () => {
+    await page.eval(`window.__toPanel({ type: 'runtime', runtime: 'helper', chosen: true, mode: 'tutor' })`);
+    await page.eval(`window.__event({ type: 'status', companionOnline: true, busy: false, epoch: 'r1', openTurns: [] })`);
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'claude-sonnet-5', profile: 'sonnet', mode: 'tutor', epoch: 'r1' })`);
+    await settle();
+    check((await modeText()) === 'Tutor* Interviewer', `starts on the tutor: ${await modeText()}`);
+    await page.eval(`(() => { window.__modeDelayMs = 400; window.__modeBody = { ok: true, mode: 'interviewer' }; window.__modeStatus = 200; })()`);
+    await page.eval(`window.__qa('.mode-opt')[1].click()`);
+    await settle();
+    check((await modeText()) === 'Tutor(off) Interviewer*(off)', `held still while the companion swaps: ${await modeText()}`);
+    await page.waitFor(`window.__qa('.mode-opt').every((b) => !b.disabled)`, { what: 'the switch to land' });
+    check((await modeText()) === 'Tutor Interviewer*', `chosen: ${await modeText()}`);
+    check((await page.eval(`JSON.stringify(window.__modeSwitches)`)) === '[{"mode":"interviewer"}]', 'only the one word is posted');
+    check(await page.eval(`window.__posted.some((m) => m.type === 'mode-switched' && m.mode === 'interviewer')`), 'the worker hears of it');
+    check(!(await page.eval(`window.__posted.some((m) => m.type === 'switch-mode')`)), 'not through the worker');
+    // The companion's own config event confirms it.
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'claude-sonnet-5', profile: 'sonnet', mode: 'interviewer', epoch: 'r1' })`);
+    await settle();
+    check((await modeText()) === 'Tutor Interviewer*', 'still the interviewer');
+    check((await page.eval(`window.__q('textarea').placeholder`)) === 'Reply to the interviewer', 'the input says who it talks to');
+    await page.screenshot(path.join(SHOTS, '07-mode-interviewer.png'), { width: 1100, height: 760 });
+  });
+
+  await scenario('a refusal or an offline helper is shown, and the mode stays what it was', async () => {
+    await page.eval(`(() => { window.__modeDelayMs = 0; window.__modeStatus = 409; window.__modeBody = { ok: false, error: { code: 'unavailable', message: 'The model server is not reachable.' } }; })()`);
+    await page.eval(`window.__qa('.mode-opt')[0].click()`);
+    await page.waitFor(`!window.__q('.hint').hidden`, { what: 'the refusal' });
+    check(/model server is not reachable/.test(await page.eval(`window.__q('.hint').textContent`)), 'the reason is shown');
+    await page.waitFor(`window.__qa('.mode-opt').every((b) => !b.disabled)`, { what: 'the buttons to come back' });
+    check((await modeText()) === 'Tutor Interviewer*', `unchanged: ${await modeText()}`);
+    await page.eval(`(() => { window.__modeStatus = 503; window.__modeBody = { ok: false, error: { message: 'companion offline' } }; })()`);
+    await page.eval(`window.__qa('.mode-opt')[0].click()`);
+    await page.waitFor(`/isn't running/.test(window.__q('.hint').textContent)`, { what: 'the offline note' });
+    await page.waitFor(`window.__qa('.mode-opt').every((b) => !b.disabled)`, { what: 'the buttons to come back' });
+    check((await modeText()) === 'Tutor Interviewer*', `unchanged: ${await modeText()}`);
+    await page.eval(`window.__modeStatus = 200; window.__modeBody = { ok: true }`);
+  });
+
+  await scenario('a helper that is in another mode than the extension is asked once to follow', async () => {
+    // The extension's saved mode is the tutor (the worker says so), the helper reports the interviewer.
+    await page.eval(`window.__modeSwitches = []; window.__toPanel({ type: 'runtime', runtime: 'helper', chosen: true, mode: 'tutor' })`);
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'claude-sonnet-5', profile: 'sonnet', mode: 'interviewer', epoch: 'r1' })`);
+    await settle();
+    await page.waitFor(`window.__modeSwitches.length === 1`, { what: 'the one request to follow' });
+    check((await page.eval(`JSON.stringify(window.__modeSwitches)`)) === '[{"mode":"tutor"}]', 'it asks for the extension\'s mode');
+    // Reporting the same thing again does not ask again.
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'claude-sonnet-5', profile: 'sonnet', mode: 'interviewer', epoch: 'r1' })`);
+    await settle();
+    await new Promise((r) => setTimeout(r, 300));
+    check((await page.eval(`window.__modeSwitches.length`)) === 1, 'asked only once');
+    // When the helper then agrees, nothing more is asked, and another panel's change is not undone.
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'claude-sonnet-5', profile: 'sonnet', mode: 'tutor', epoch: 'r1' })`);
+    await settle();
+    check((await modeText()) === 'Tutor* Interviewer', `follows the helper's report: ${await modeText()}`);
+    check((await page.eval(`window.__modeSwitches.length`)) === 1, 'still one request');
+  });
+
+  await scenario('the browser runtime: the mode switch goes through the worker and its answer decides', async () => {
+    await page.eval(`window.__toPanel({ type: 'runtime', runtime: 'extension', chosen: true, mode: 'tutor' })`);
+    await page.eval(`window.__posted.length = 0`);
+    await page.eval(`window.__workerEvent({ type: 'config', provider: 'local', label: 'Local model', model: 'gpt-oss:20b', mode: 'tutor' })`);
+    await settle();
+    await page.eval(`window.__qa('.mode-opt')[1].click()`);
+    await settle();
+    const request = await page.eval(`window.__posted.find((m) => m.type === 'switch-mode')`);
+    check(request && request.mode === 'interviewer' && typeof request.reqId === 'number', `posted: ${JSON.stringify(request)}`);
+    check((await modeText()) === 'Tutor(off) Interviewer*(off)', `held still: ${await modeText()}`);
+    await page.eval(`window.__toPanel({ type: 'switch-result', reqId: ${request.reqId}, ok: true, runtime: 'extension' })`);
+    await page.waitFor(`window.__qa('.mode-opt').every((b) => !b.disabled)`, { what: 'the answer' });
+    check((await modeText()) === 'Tutor Interviewer*', `chosen: ${await modeText()}`);
+    // A refusal from the worker is shown and nothing changes.
+    await page.eval(`window.__posted.length = 0`);
+    await page.eval(`window.__toPanel({ type: 'runtime', runtime: 'extension', chosen: true, mode: 'interviewer' })`);
+    await page.eval(`window.__qa('.mode-opt')[0].click()`);
+    await settle();
+    const second = await page.eval(`window.__posted.find((m) => m.type === 'switch-mode')`);
+    await page.eval(`window.__toPanel({ type: 'switch-result', reqId: ${second.reqId}, ok: false, code: 'failed', message: 'Could not switch.' })`);
+    await page.waitFor(`/Could not switch\\./.test(window.__q('.hint').textContent)`, { what: 'the refusal' });
+    await page.waitFor(`window.__qa('.mode-opt').every((b) => !b.disabled)`, { what: 'the buttons to come back' });
+    check((await modeText()) === 'Tutor Interviewer*', `unchanged: ${await modeText()}`);
   });
 } finally {
   await browser.close();

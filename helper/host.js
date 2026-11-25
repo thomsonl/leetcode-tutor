@@ -21,12 +21,18 @@
 //   { type: 'start' }   -> starts what is not running, then a status
 //   { type: 'reset' }   -> the companion clears its tutor context: { type: 'reset', ok }
 //   { type: 'stop' }    -> stops both children, answers { type: 'stopped' }, exits
+//   { type: 'update-check' } -> asks the npm registry now: { type: 'update-check', current, latest, newer, ... }
+//   { type: 'update' }  -> stops both children, installs the newer version
+//                          (update.js), answers { type: 'update', ok }, and
+//                          exits so the browser starts the new copy
+//   { type: 'set-auto-update', enabled } -> remembers the choice, then a status
 // A status with no id is also sent whenever a child starts or exits.
 //
 // It stops both children and exits when the browser closes stdin (the
 // extension disconnected, or the browser quit or crashed), on SIGTERM, SIGHUP
 // or SIGINT, on `stop`, and when the extension has not sent anything for
-// idleMs (it pings while a LeetCode tab is open).
+// idleMs (it pings while a LeetCode tab is open). A clean exit is also when a
+// newer helper is installed by itself, unless the student turned that off.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,6 +40,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createDecoder, encodeMessage } from './framing.js';
 import { VERSION } from './config.js';
+import { makeUpdater } from './update.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -110,6 +117,7 @@ export function createHost({
   startTimeoutMs = DEFAULTS.startTimeoutMs,
   reviveMs = DEFAULTS.reviveMs,
   rootError = null,
+  updater = null,
 }) {
   const port = env.CAPTURE_PORT ? Number(env.CAPTURE_PORT) : 8135;
   const base = `http://127.0.0.1:${port}`;
@@ -152,6 +160,7 @@ export function createHost({
       relay: { state: relayState, pid: alive(relay) ? relay.pid : null },
       companion: { state: alive(companion) ? 'running' : 'stopped', pid: alive(companion) ? companion.pid : null },
       error: lastError,
+      update: updater ? updater.view() : null,
     };
   }
 
@@ -304,6 +313,15 @@ export function createHost({
         timers.clearInterval(tick);
         if (starting) await starting.catch(() => {});
         await stopChildren();
+        // Nothing is using the helper now: the time to install a newer one.
+        if (code === 0 && updater) {
+          try {
+            const result = await updater.autoRun();
+            if (result && result.started) note('a newer helper is being installed');
+          } catch {
+            // an update that cannot start changes nothing
+          }
+        }
         exit(code);
       })();
     }
@@ -337,6 +355,35 @@ export function createHost({
         await stopChildren();
         send({ type: 'stopped', id });
         await shutdown(0);
+        return;
+      case 'update-check': {
+        if (!updater) {
+          send({ type: 'update-check', id, update: null });
+          return;
+        }
+        await updater.check(true);
+        send({ type: 'update-check', id, update: updater.view() });
+        return;
+      }
+      case 'update': {
+        if (!updater) {
+          send({ type: 'update', id, ok: false, error: 'this helper cannot update itself' });
+          return;
+        }
+        await updater.check(false);
+        note('update requested');
+        await stopChildren();
+        const result = await updater.run({ wait: true });
+        note(result.ok ? `updated to ${result.version}` : `update failed: ${result.error}`);
+        send({ type: 'update', id, ok: Boolean(result.ok), version: result.version || null, error: result.ok ? null : result.error || 'the update failed' });
+        // The new copy is in place: leave, so the browser starts it.
+        if (result.ok) await shutdown(0);
+        else if (wantRunning) await ensureStarted().catch(() => {});
+        return;
+      }
+      case 'set-auto-update':
+        if (updater) updater.setAuto(Boolean(message.enabled));
+        send(status(id));
         return;
       default:
         send({ type: 'error', id, error: `unknown message type ${JSON.stringify(message.type)}` });
@@ -405,6 +452,10 @@ export function main() {
       // the relay reports a log it cannot write
     }
   }
+  // Only an installed copy (the installer wrote helper-config.json beside it)
+  // updates itself; one run from a checkout or by hand never does.
+  const installed = fs.existsSync(path.join(HERE, 'helper-config.json'));
+  const updater = installed && !process.env.LEETCODE_CAPTURE_HELPER_NO_UPDATE ? makeUpdater({ appDir: HERE, dir: path.dirname(HERE), current: VERSION, logFd }) : null;
   const host = createHost({
     input: process.stdin,
     output: process.stdout,
@@ -412,7 +463,11 @@ export function main() {
     env: childEnv,
     logFd,
     rootError: checkRoot(root),
+    updater,
   });
+  // Ask the registry once things have settled (at most once a day, cached), so
+  // the extension can say a newer helper exists; a failure is just not knowing.
+  if (updater) setTimeout(() => updater.check(false).catch(() => {}), 3000).unref();
   for (const sig of ['SIGTERM', 'SIGHUP', 'SIGINT']) process.on(sig, () => host.shutdown(0));
   return host;
 }

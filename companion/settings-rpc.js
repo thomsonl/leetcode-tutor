@@ -26,10 +26,10 @@ import {
   saveSettings,
   statusSummary,
 } from './settings.js';
-import { checkCodexLogin } from './codex-backend.js';
+import { checkCodexLogin, listCodexModels } from './codex-backend.js';
 import { isSignInError, signInMessage } from './sign-in.js';
 import { PROFILE_ID_RE, findProfile } from '../extension/shared/profiles.js';
-import { CONNECTION_TEST_PROMPT as TEST_PROMPT } from '../extension/shared/tutor-prompt.js';
+import { CONNECTION_TEST_PROMPT as TEST_PROMPT, MODES, normalizeMode } from '../extension/shared/tutor-prompt.js';
 
 const TEST_TIMEOUT_MS = 90_000;
 const MODELS_TIMEOUT_MS = 6000;
@@ -123,7 +123,7 @@ export function createSettingsRpc(deps) {
     const stored = deps.getStored();
     const profile = typeof id === 'string' && PROFILE_ID_RE.test(id) ? findProfile(stored.profiles, id) : null;
     if (!profile) {
-      throw Object.assign(new SettingsError('The helper app does not have that model saved. Open Manage models and press Save.', 'profile'), { code: 'unknown' });
+      throw Object.assign(new SettingsError('The helper app does not have that model saved. Open Settings and choose it there.', 'profile'), { code: 'unknown' });
     }
     const env = deps.env || {};
     if ((env.COMPANION_BACKEND && env.COMPANION_BACKEND !== profile.provider) || (env.COMPANION_MODEL && env.COMPANION_MODEL !== profile.model)) {
@@ -148,6 +148,34 @@ export function createSettingsRpc(deps) {
     deps.setStored(next);
     await deps.apply(effective, backend, 'switch');
     return { active: statusSummary(effective), profile: id };
+  }
+
+  // The Tutor | Interviewer switch. Like switchProfile it can change nothing
+  // but one saved setting (the mode, one of two fixed words), so whoever may
+  // call it can at most flip between the two. The new backend carries the new
+  // instructions and the conversation starts over (companion.js applySettings
+  // sees the prompt key change). Resolves once the swap has happened.
+  async function switchMode({ mode }) {
+    if (typeof mode !== 'string' || !MODES.includes(mode)) {
+      throw Object.assign(new SettingsError('That mode does not exist.', 'mode'), { code: 'unknown' });
+    }
+    const stored = deps.getStored();
+    const current = resolveEffective(stored, deps.env);
+    if (normalizeMode(stored.mode) === mode) return { active: statusSummary(current), mode };
+    const next = applyPatch(stored, { mode });
+    const effective = resolveEffective(next, deps.env);
+    const problem = missingRequirement(effective);
+    if (problem) throw Object.assign(new SettingsError(`${problem}. Open Settings to finish setting it up.`, 'mode'), { code: 'unavailable' });
+    let backend;
+    try {
+      backend = await deps.buildBackend(effective);
+    } catch (err) {
+      throw Object.assign(new SettingsError(scrub(err.message, [effective.apiKey]), 'mode'), { code: 'unavailable' });
+    }
+    saveSettings(next, deps.file);
+    deps.setStored(next);
+    await deps.apply(effective, backend, 'switch');
+    return { active: statusSummary(effective), mode };
   }
 
   // Tries a draft (the saved settings with the page's unsaved edits on top).
@@ -185,6 +213,12 @@ export function createSettingsRpc(deps) {
 
   // Lists model names a server offers, for the model field's suggestions.
   async function models({ provider, baseUrl, apiKey }) {
+    // The ChatGPT subscription has no server address: its models are the
+    // Codex CLI's own catalog.
+    if (provider === 'chatgpt') {
+      const ids = await (deps.listCodexModels || (() => listCodexModels({ command: deps.codexCommand || 'codex', env: deps.env })))();
+      return ids.length ? { models: ids } : { models: [], message: "Couldn't read the Codex CLI's model list." };
+    }
     const stored = deps.getStored();
     const id = PROVIDERS[provider] ? provider : 'local';
     const draft = applyPatch(stored, {
@@ -222,7 +256,7 @@ export function createSettingsRpc(deps) {
     }
   }
 
-  const METHODS = { get, save, test, models, setProfiles, switchProfile };
+  const METHODS = { get, save, test, models, setProfiles, switchProfile, switchMode };
 
   // Single entry point used by the bridge. Never throws: the result is always
   // { ok: true, result } or { ok: false, error: { message, field } }.

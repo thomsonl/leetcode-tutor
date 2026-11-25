@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { buildMessages } from '../extension/shared/context-budget.js';
+import { idsFromCodexCatalog, resolveFromIds, tierOf } from '../extension/shared/model-aliases.js';
 import { formatPinnedCode } from '../extension/shared/code-ledger.js';
 import { flattenMessages, normalizeConversation } from '../extension/shared/conversation.js';
 import { SUMMARY_MAX_TOKENS, SUMMARY_TIMEOUT_MS, condense, condenseCount, summaryBodyChars } from '../extension/shared/context-summary.js';
@@ -119,6 +120,38 @@ export function parseCodexOutput(stdout) {
   return { text, error };
 }
 
+// The models the Codex CLI itself lists (`codex debug models`, which refreshes
+// from the service): their IDs, or [] when it cannot be read.
+export function listCodexModels({ command = 'codex', commandArgs = [], env = process.env, timeoutMs = 20_000 } = {}) {
+  return new Promise((resolve) => {
+    let out = '';
+    let child;
+    try {
+      child = spawn(command, [...commandArgs, 'debug', 'models'], { env: codexSubscriptionEnv(env), stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch {
+      resolve([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      resolve([]);
+    }, timeoutMs);
+    child.stdout.on('data', (c) => (out += c.toString()));
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve([]);
+    });
+    child.on('close', () => {
+      clearTimeout(timer);
+      try {
+        resolve(idsFromCodexCatalog(JSON.parse(out)));
+      } catch {
+        resolve([]);
+      }
+    });
+  });
+}
+
 export class CodexBackend {
   constructor({
     model = null,
@@ -130,9 +163,14 @@ export class CodexBackend {
     timeoutMs = DEFAULT_TIMEOUT_MS,
     summaryTimeoutMs = SUMMARY_TIMEOUT_MS,
     env = process.env,
+    listModels = () => listCodexModels({ command, commandArgs, env }),
   }) {
     if (!cwd) throw new Error('CodexBackend needs a scratch directory (cwd)');
     this.model = model;
+    // How the saved model's tier ("luna") is turned into the newest real one:
+    // from the CLI's own catalog, remembered for an hour. Injectable for tests.
+    this.listModels = listModels;
+    this.resolved = null;
     this.cwd = cwd;
     this.systemPrompt = systemPrompt;
     this.maxHistoryTurns = maxHistoryTurns;
@@ -258,9 +296,29 @@ export class CodexBackend {
     this.history = this.history.slice(2 * k);
   }
 
-  runCodex(prompt, { timeoutMs = this.timeoutMs } = {}) {
+  // The model to pass to codex: an exact model as saved; a tier ("luna") as
+  // the newest model of it in the CLI's catalog; with the tier not in the
+  // catalog or the catalog unreadable, none, so the CLI uses its own default
+  // (which is always a current model).
+  async resolveModel() {
+    const tier = tierOf(this.model);
+    if (!tier) return this.model;
+    const now = Date.now();
+    if (this.resolved && this.resolved.until > now) return this.resolved.model;
+    let model = null;
+    try {
+      model = resolveFromIds(this.model, await this.listModels());
+    } catch {
+      model = null;
+    }
+    this.resolved = { model, until: now + (model ? 60 * 60 * 1000 : 60 * 1000) };
+    return model;
+  }
+
+  async runCodex(prompt, { timeoutMs = this.timeoutMs } = {}) {
+    const model = await this.resolveModel();
     return new Promise((resolve, reject) => {
-      const args = [...this.commandArgs, ...buildCodexArgs({ model: this.model, cwd: this.cwd })];
+      const args = [...this.commandArgs, ...buildCodexArgs({ model, cwd: this.cwd })];
       const child = spawn(this.command, args, { env: codexSubscriptionEnv(this.env), stdio: ['pipe', 'pipe', 'pipe'] });
       let stdout = '';
       let stderr = '';

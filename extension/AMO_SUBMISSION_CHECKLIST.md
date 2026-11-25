@@ -66,7 +66,7 @@ The helper is not part of this add-on. It is a separate program the user install
 
 inject.js is a web accessible resource added to the page as a script tag, so it can read the full text of LeetCode's Monaco editor model; it only answers the content script over a CustomEvent and makes no network requests.
 
-To test without any account: install Ollama, run "ollama pull qwen2.5:0.5b" (any small model works), set OLLAMA_ORIGINS to the moz-extension:// origin shown in Settings, choose "Local model" in Settings, press Save and allow the localhost permission, then open https://leetcode.com/problems/two-sum/ and click the Tutor tab and Submit.
+To test without any account: install Ollama, run "ollama pull qwen2.5:0.5b" (any small model works), set OLLAMA_ORIGINS to the moz-extension:// origin shown in Settings, add a "Local model" in Settings (settings save by themselves) and allow the localhost permission, then open https://leetcode.com/problems/two-sum/ and click the Tutor tab and Submit.
 ```
 
 ## Data collection permissions

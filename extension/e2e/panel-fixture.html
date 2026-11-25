@@ -10,7 +10,8 @@
   window.fetch is replaced before panel.js runs, so nothing here touches the
   network: /panel/events is a stream the test writes into with __push(text),
   /panel/message answers with __postStatus after __postDelayMs,
-  /panel/switch-profile with __switchStatus and __switchBody, and
+  /panel/switch-profile with __switchStatus and __switchBody,
+  /panel/switch-mode with __modeStatus and __modeBody, and
   __relayDown makes a new /panel/events connection fail. Served by
   panel-render.e2e.mjs under /problems/<slug>/ so the panel sees a slug.
 -->
@@ -105,7 +106,18 @@
         window.__switches = window.__switches || [];
         window.__switches.push(JSON.parse(options.body));
         await new Promise((r) => setTimeout(r, window.__switchDelayMs || 0));
+        // __switchQueue answers one call each ([{ status, body }]) before the fixed answer.
+        const queued = (window.__switchQueue || []).shift();
+        if (queued) return new Response(JSON.stringify(queued.body), { status: queued.status, headers: { "Content-Type": "application/json" } });
         return new Response(JSON.stringify(window.__switchBody || { ok: true }), { status: window.__switchStatus || 200, headers: { "Content-Type": "application/json" } });
+      }
+      // The mode switch's helper path: answers __modeStatus with __modeBody
+      // after __modeDelayMs, and records each body in __modeSwitches.
+      if (url.pathname === "/panel/switch-mode") {
+        window.__modeSwitches = window.__modeSwitches || [];
+        window.__modeSwitches.push(JSON.parse(options.body));
+        await new Promise((r) => setTimeout(r, window.__modeDelayMs || 0));
+        return new Response(JSON.stringify(window.__modeBody || { ok: true }), { status: window.__modeStatus || 200, headers: { "Content-Type": "application/json" } });
       }
       if (url.pathname === "/panel/message") {
         window.__posts.push(JSON.parse(options.body));

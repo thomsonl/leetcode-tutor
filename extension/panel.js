@@ -275,6 +275,8 @@
         model: typeof event.model === "string" && event.model ? event.model : null,
         // The tutor's subscription is not signed in (companion/sign-in.js).
         attention: event.attention === "signin" ? "signin" : null,
+        // Tutor or Interviewer; anything else is the tutor.
+        mode: event.mode === "interviewer" ? "interviewer" : "tutor",
       };
       if (!hasOpenTurn(state)) state.displayConfig = state.config;
       return null;
@@ -1311,8 +1313,36 @@
     button.model[hidden] { display: none; }
     button.model:hover:not(:disabled), button.model[aria-expanded="true"] { color: var(--fg); background: var(--fill); }
     button.model:focus-visible { outline: 1px solid color-mix(in srgb, var(--fg) 45%, transparent); outline-offset: 0; }
-    .provider { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* The vertical padding (undone by the margin) gives the clipped text room above
+       and below the line box, so a short line height from the page's own select
+       styling never shaves the tops and tails off the letters. */
+    .provider { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 0; margin: -4px 0; }
     button.model svg { flex: none; }
+    /* The Tutor | Interviewer switch: two toggle buttons in one small outlined
+       group, the chosen one filled. It never shrinks (the status and the model
+       name give way first) and sits just left of the model button. */
+    .mode { position: relative; flex: none; display: flex; align-items: center; gap: 2px; height: 22px; box-sizing: border-box; padding: 2px; border: 1px solid var(--line); border-radius: 6px; }
+    .mode[hidden] { display: none; }
+    .mode-thumb { position: absolute; left: 0; top: 0; width: 0; height: 0; border-radius: 4px; background: var(--fill); pointer-events: none; opacity: 0; }
+    .mode-thumb[data-ready] { opacity: 1; transition: left 0.5s cubic-bezier(0.4, 0, 0.2, 1), width 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+    button.mode-opt { position: relative; z-index: 1; flex: none; width: auto; height: 16px; padding: 0 8px; border-radius: 4px; color: var(--muted); font: 500 12px / 16px var(--font); white-space: nowrap; cursor: pointer; transition: color 0.5s ease; }
+    button.mode-opt[aria-pressed="true"] { color: var(--fg); cursor: default; }
+    /* The filled highlight marks the current mode, so hovering must not paint one
+       (it would otherwise take the panel's general button:hover fill). */
+    button.mode-opt:hover:not(:disabled) { background: transparent; }
+    @media (prefers-reduced-motion: reduce) { .mode-thumb[data-ready], button.mode-opt { transition: none; } }
+    button.mode-opt:disabled:not([aria-pressed="true"]) { opacity: 0.55; cursor: progress; }
+    button.mode-opt:focus-visible { outline: 1px solid color-mix(in srgb, var(--fg) 45%, transparent); outline-offset: 0; }
+    /* The "Updated to x.y.z" row under the header, shown until it is
+       dismissed or the Changelog has been opened. */
+    .update { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 1px; padding: 6px 12px; border-bottom: 1px solid var(--head-line); background: var(--fill); color: var(--muted); font-size: 12px; line-height: 16px; }
+    .update[hidden] { display: none; }
+    .update-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    button.update-link { flex: none; width: auto; height: 20px; padding: 0 6px; border-radius: 4px; color: var(--fg); font: 500 12px / 16px var(--font); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; cursor: pointer; }
+    button.update-link:hover { background: var(--fill); }
+    button.update-close { flex: none; width: 20px; height: 20px; margin-right: -4px; border-radius: 4px; color: var(--muted); cursor: pointer; }
+    button.update-close:hover { color: var(--fg); background: var(--fill); }
+    button.update-link:focus-visible, button.update-close:focus-visible { outline: 1px solid color-mix(in srgb, var(--fg) 45%, transparent); outline-offset: 0; }
     .menu {
       position: absolute; z-index: 5; top: 30px; right: 8px; box-sizing: border-box;
       width: max-content; min-width: min(220px, calc(100% - 16px)); max-width: min(320px, calc(100% - 16px));
@@ -1755,6 +1785,142 @@
 
   // ---- the panel -------------------------------------------------------
 
+  // The progress popup: the Progress page's own view (progress-card.html, the
+  // graphs and the solved counts) in a dialog over the page, like LeetCode's
+  // own Settings dialog but with only a light dim behind it. It is built on the
+  // page itself, not inside the panel (the panel clips what is inside it), the
+  // first time it is opened and kept, so reopening is instant and it stays
+  // live. Escape, the close button and a click outside it close it.
+  let progressModal = null;
+  const PROGRESS_MODAL_ID = "lc-tutor-progress-modal";
+
+  function progressModalCss(theme) {
+    const dark = theme === "dark";
+    return `
+      :host { all: initial; }
+      .backdrop {
+        position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: center; justify-content: center;
+        background: rgba(0, 0, 0, ${dark ? "0.42" : "0.28"}); font: 14px / 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        animation: fade 0.16s ease-out;
+      }
+      .backdrop[hidden] { display: none; }
+      .dialog {
+        box-sizing: border-box; display: flex; flex-direction: column; width: min(1120px, 92vw); height: min(880px, 90vh); overflow: hidden;
+        border: 1px solid ${dark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.12)"}; border-radius: 12px;
+        background: ${dark ? "#282828" : "#ffffff"}; color: ${dark ? "#f5f5f5" : "#262626"};
+        box-shadow: 0 24px 64px rgba(0, 0, 0, ${dark ? "0.55" : "0.3"}); outline: none;
+        animation: rise 0.16s ease-out;
+      }
+      .head { flex: none; display: flex; align-items: center; gap: 12px; padding: 14px 16px 12px 22px; }
+      .title { flex: 1; min-width: 0; margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; }
+      button { all: unset; box-sizing: border-box; cursor: pointer; border-radius: 6px; color: ${dark ? "rgba(255, 255, 255, 0.62)" : "rgba(0, 0, 0, 0.55)"}; }
+      button:hover { color: ${dark ? "#f5f5f5" : "#262626"}; background: ${dark ? "rgba(255, 255, 255, 0.07)" : "rgba(0, 0, 0, 0.05)"}; }
+      button:focus-visible { outline: 2px solid ${dark ? "#6aa7ff" : "#1a73e8"}; outline-offset: 1px; }
+      .link { padding: 3px 10px; font-size: 13px; line-height: 20px; }
+      .close { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; }
+      iframe { flex: 1; min-height: 0; width: 100%; border: 0; border-top: 1px solid ${dark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)"}; background: transparent; color-scheme: normal; }
+      @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes rise { from { transform: translateY(6px); } to { transform: none; } }
+      @media (prefers-reduced-motion: reduce) { .backdrop, .dialog { animation: none; } }
+    `;
+  }
+
+  function buildProgressModal(runtime, theme, onClose) {
+    const host = document.createElement("div");
+    host.id = PROGRESS_MODAL_ID;
+    const root = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = progressModalCss(theme);
+    const backdrop = el("div", "backdrop");
+    backdrop.hidden = true;
+    const dialog = el("div", "dialog");
+    dialog.tabIndex = -1;
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", "Your progress");
+    const head = el("div", "head");
+    const title = el("h2", "title", "Your progress");
+    const full = el("button", "link", "Open full page");
+    full.type = "button";
+    const close = el("button", "close", "");
+    close.type = "button";
+    close.setAttribute("aria-label", "Close");
+    close.title = "Close";
+    close.innerHTML =
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+    head.append(title, full, close);
+    const frame = document.createElement("iframe");
+    frame.title = "Your progress";
+    dialog.append(head, frame);
+    backdrop.appendChild(dialog);
+    root.append(style, backdrop);
+    // Keys typed in the popup stay out of LeetCode's own shortcuts.
+    for (const type of ["keydown", "keyup", "keypress"]) host.addEventListener(type, (e) => e.stopPropagation());
+    backdrop.addEventListener("pointerdown", (event) => {
+      if (event.target === backdrop) onClose(true);
+    });
+    close.addEventListener("click", () => onClose(true));
+    full.addEventListener("click", () => {
+      sendToWorker({ type: "lc-tutor:open-progress" });
+      onClose(false);
+    });
+    return { host, style, backdrop, dialog, frame, theme, runtime, loadedTheme: null };
+  }
+
+  // The page's theme as the popup should draw it.
+  function pageTheme() {
+    const scheme = getComputedStyle(document.documentElement).colorScheme || "";
+    if (/\blight\b/.test(scheme) && !/\bdark\b/.test(scheme)) return "light";
+    if (/\bdark\b/.test(scheme)) return "dark";
+    return document.documentElement.classList.contains("dark") ? "dark" : "light";
+  }
+
+  function wireProgressCard(p) {
+    const { progress } = p;
+    const runtime = typeof chrome !== "undefined" && chrome.runtime && typeof chrome.runtime.getURL === "function" ? chrome.runtime : null;
+    const isOpen = () => Boolean(progressModal && !progressModal.backdrop.hidden);
+    const close = (restoreFocus = false) => {
+      if (!isOpen()) return;
+      progressModal.backdrop.hidden = true;
+      progress.setAttribute("aria-expanded", "false");
+      if (restoreFocus) progress.focus();
+    };
+    const open = () => {
+      if (!runtime) return;
+      const theme = pageTheme();
+      if (!progressModal) {
+        progressModal = buildProgressModal(runtime, theme, close);
+        document.body.appendChild(progressModal.host);
+      }
+      if (progressModal.loadedTheme !== theme) {
+        // A different theme than it was drawn in: restyled, and the view reloaded in it.
+        progressModal.style.textContent = progressModalCss(theme);
+        progressModal.loadedTheme = theme;
+        progressModal.frame.src = `${runtime.getURL("progress-card.html")}?embed&theme=${theme}`;
+      }
+      p.menu.hidden = true;
+      progressModal.backdrop.hidden = false;
+      progress.setAttribute("aria-expanded", "true");
+      progressModal.dialog.focus();
+    };
+    p.closeProgressCard = close;
+    progress.addEventListener("click", () => (isOpen() ? close() : open()));
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Escape" && isOpen()) {
+          event.stopPropagation();
+          close(true);
+        }
+      },
+      true
+    );
+    // Escape pressed inside the frame (where the page cannot see it).
+    window.addEventListener("message", (event) => {
+      if (progressModal && event.source === progressModal.frame.contentWindow && event.data && event.data.type === "lc-progress-card-close") close(true);
+    });
+  }
+
   function buildPanel() {
     const host = document.createElement("div");
     host.id = HOST_ID;
@@ -1846,9 +2012,66 @@
     progress.innerHTML =
       '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>';
-    progress.addEventListener("click", () => sendToWorker({ type: "lc-tutor:open-progress" }));
-    headRight.append(model, practice, progress, gear);
+    progress.setAttribute("aria-haspopup", "dialog");
+    progress.setAttribute("aria-expanded", "false");
+    // The mode switch (see "The mode switch" below): toggle buttons, not a
+    // radio group, since choosing one starts a new conversation and moving
+    // between them with the arrow keys must not.
+    const modeGroup = el("div", "mode");
+    modeGroup.hidden = true;
+    modeGroup.setAttribute("role", "group");
+    modeGroup.setAttribute("aria-label", "Tutor mode");
+    // The highlight slides to the chosen option instead of jumping.
+    const modeThumb = el("span", "mode-thumb");
+    modeThumb.setAttribute("aria-hidden", "true");
+    modeGroup.appendChild(modeThumb);
+    const modeButtons = {};
+    for (const [id, label] of [
+      ["tutor", "Tutor"],
+      ["interviewer", "Interviewer"],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "mode-opt";
+      button.dataset.mode = id;
+      button.setAttribute("aria-pressed", "false");
+      button.textContent = label;
+      button.title = `${label} mode. Switching starts a new conversation.`;
+      modeButtons[id] = button;
+      modeGroup.appendChild(button);
+    }
+    headRight.append(modeGroup, model, practice, progress, gear);
     head.append(headLeft, headRight);
+
+    // After an update (see shared/update-notice.js): what happened, a link to
+    // the Changelog, and a close button. Hidden until the worker says so.
+    const updateRow = el("div", "update");
+    updateRow.hidden = true;
+    updateRow.setAttribute("role", "status");
+    const updateText = el("span", "update-text", "");
+    const updateLink = document.createElement("button");
+    updateLink.type = "button";
+    updateLink.className = "update-link";
+    updateLink.textContent = "What's new";
+    const updateClose = document.createElement("button");
+    updateClose.type = "button";
+    updateClose.className = "update-close";
+    updateClose.setAttribute("aria-label", "Dismiss");
+    updateClose.title = "Dismiss";
+    // Feather's "x" (MIT), drawn in the text color.
+    updateClose.innerHTML =
+      '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+    updateRow.append(updateText, updateLink, updateClose);
+    updateLink.addEventListener("click", () => {
+      updateNote = null;
+      sendToWorker({ type: "lc-tutor:open-changelog" });
+      scheduleRender();
+    });
+    updateClose.addEventListener("click", () => {
+      updateNote = null;
+      sendToWorker({ type: "lc-tutor:update-seen" });
+      scheduleRender();
+    });
 
     const banner = el("div", "banner");
     banner.hidden = true;
@@ -1924,7 +2147,7 @@
     counter.setAttribute("aria-live", "polite");
     composer.appendChild(counter);
 
-    wrap.append(head, scroll, composer, menu);
+    wrap.append(head, updateRow, scroll, composer, menu);
     root.append(style, wrap);
 
     // LeetCode binds many single-key shortcuts on the page, and this script's
@@ -1932,8 +2155,10 @@
     // here must trigger neither, so keys stop at the host.
     for (const type of ["keydown", "keyup", "keypress"]) host.addEventListener(type, (e) => e.stopPropagation());
 
-    const p = { host, wrap, status, statusText, headRight, model, provider, menu, gear, practice, progress, banner, scroll, view, feed, box, input, send, hint, counter };
+    const p = { host, wrap, status, statusText, headRight, modeGroup, modeThumb, modeButtons, updateRow, updateText, model, provider, menu, gear, practice, progress, banner, scroll, view, feed, box, input, send, hint, counter };
+    for (const [id, button] of Object.entries(modeButtons)) button.addEventListener("click", () => chooseMode(id));
     wireSwitcher(p);
+    wireProgressCard(p);
     return p;
   }
 
@@ -2072,6 +2297,21 @@
     }
   }
 
+  // The update the worker noticed ({ from, to }) while it is still unseen,
+  // for the row under the header; asked again when the page regains focus, so
+  // a card dismissed or a Changelog opened in another tab goes here too.
+  let updateNote = null;
+  async function checkUpdate() {
+    const answer = await askWorker({ type: "lc-tutor:update-notice" });
+    const next = answer && answer.ok === true && answer.notice && typeof answer.notice.to === "string" ? answer.notice : null;
+    const changed = (next && next.to) !== (updateNote && updateNote.to) || (next && next.from) !== (updateNote && updateNote.from);
+    updateNote = next;
+    if (changed) scheduleRender();
+  }
+  window.addEventListener("focus", () => {
+    if (mounted) checkUpdate();
+  });
+
   // A message to the background worker that waits for its answer; null when
   // it cannot be asked.
   async function askWorker(message) {
@@ -2138,6 +2378,14 @@
         ok: false,
         light: "neutral",
         banner: "Choose the tutor's model in the extension options (the gear above). A local model or an API key needs nothing else installed.",
+      };
+    }
+    if (helperState === "updating" && (sourceReachable === false || state.companionOnline === false)) {
+      return {
+        label: "Updating the helper",
+        ok: false,
+        light: "neutral",
+        banner: "Updating the helper app to its newest version. It takes a moment, then the tutor starts by itself.",
       };
     }
     if (sourceReachable === false) {
@@ -2820,16 +3068,42 @@
     if (p.model.hidden && !p.menu.hidden) closeMenu(p, false);
     if (!p.menu.hidden) renderMenu(p);
 
+    const updateText = updateNote ? (updateNote.from ? `Updated from ${updateNote.from} to ${updateNote.to}.` : `Updated to ${updateNote.to}.`) : "";
+    if (p.updateRow.hidden !== !updateNote) p.updateRow.hidden = !updateNote;
+    if (p.updateText.textContent !== updateText) p.updateText.textContent = updateText;
+
+    // The mode switch shows whenever there is a tutor to switch, and is held
+    // still while a switch is under way.
+    if (p.modeGroup.hidden !== !providerText) p.modeGroup.hidden = !providerText;
+    const mode = currentMode();
+    for (const [id, button] of Object.entries(p.modeButtons)) {
+      const pressed = String(id === mode);
+      if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
+      const locked = Boolean(switchingMode);
+      if (button.disabled !== locked) button.disabled = locked;
+    }
+    // Slide the highlight under the chosen option (the first placement is not animated).
+    const activeOpt = p.modeButtons[mode];
+    if (!p.modeGroup.hidden && activeOpt && activeOpt.offsetWidth) {
+      const t = p.modeThumb;
+      const box = { left: `${activeOpt.offsetLeft}px`, top: `${activeOpt.offsetTop}px`, width: `${activeOpt.offsetWidth}px`, height: `${activeOpt.offsetHeight}px` };
+      for (const [name, value] of Object.entries(box)) if (t.style[name] !== value) t.style[name] = value;
+      if (!t.hasAttribute("data-ready")) requestAnimationFrame(() => requestAnimationFrame(() => t.setAttribute("data-ready", "")));
+    }
+
     const practiceHidden = !slug || !messagingRuntime();
     if (p.practice.hidden !== practiceHidden) p.practice.hidden = practiceHidden;
     const progressHidden = !messagingRuntime();
     if (p.progress.hidden !== progressHidden) p.progress.hidden = progressHidden;
+    if (progressHidden && p.closeProgressCard) p.closeProgressCard();
 
     const canSend = conn.ok && Boolean(slug);
     p.input.disabled = !canSend;
     p.send.disabled = !canSend || sending || !p.input.value.trim() || p.input.value.length > MAX_MESSAGE_CHARS;
     p.input.placeholder = canSend
-      ? "Ask the tutor about this problem"
+      ? mode === "interviewer"
+        ? "Reply to the interviewer"
+        : "Ask the tutor about this problem"
       : setupRestart
         ? "Finishing setup"
         : extensionGone
@@ -3001,6 +3275,7 @@
     };
     tab.setAttribute("aria-selected", "false");
     mounted = m;
+    checkUpdate();
     // A fresh panel has an empty feed; the cached item nodes move into it on
     // the next render.
     feedDirty = true;
@@ -3490,7 +3765,8 @@
     const reason = entryReason(entry);
     if (reason) return reason;
     const parts = [entry.providerLabel];
-    if (entry.model && entry.model !== entry.name) parts.push(entry.model);
+    // The model is left out when it only says the name again ("Luna" and "luna").
+    if (entry.model && entry.model.toLowerCase() !== String(entry.name).toLowerCase()) parts.push(entry.model);
     return parts.join(" \u00b7 ");
   }
 
@@ -3632,7 +3908,9 @@
     );
   }
 
-  function workerSwitch(id) {
+  // One request to the worker that is answered with a 'switch-result' (the
+  // model switch and the mode switch share the wait).
+  function workerRequest(type, fields) {
     return new Promise((resolve, reject) => {
       const reqId = nextSwitchId++;
       const timer = setTimeout(() => {
@@ -3640,12 +3918,119 @@
         reject(new Error("timed out"));
       }, SWITCH_TIMEOUT_MS);
       pendingSwitches.set(reqId, { resolve, reject, timer });
-      if (!postToWorker({ type: "switch-profile", reqId, id })) {
+      if (!postToWorker({ type, reqId, ...fields })) {
         pendingSwitches.delete(reqId);
         clearTimeout(timer);
         reject(new Error("no worker"));
       }
     });
+  }
+
+  // Asks the worker to send the helper the saved models, for at most a few
+  // seconds; whether it was done.
+  function syncWithTimeout() {
+    return Promise.race([workerRequest("sync-helper-profiles", {}).then((r) => Boolean(r && r.ok), () => false), new Promise((resolve) => setTimeout(() => resolve(false), 8000))]);
+  }
+
+  function workerSwitch(id) {
+    return workerRequest("switch-profile", { id });
+  }
+
+  // ---- the mode switch ---------------------------------------------------------
+  //
+  // Tutor or Interviewer, from the two buttons in the header. Choosing one
+  // starts a new conversation (the tutor's instructions change, and a chat
+  // held under the old ones would carry the old persona), which the worker or
+  // the helper's companion announces with a notice the panel handles like a
+  // new problem. Through the worker for the browser runtime, through the
+  // relay's POST /panel/switch-mode while the helper is in use. The mode is
+  // one setting for the whole browser, not per problem.
+
+  let wantedMode = null; // the extension's saved mode, as the worker reports it
+  let switchingMode = null; // the mode being switched to
+  let reconciledMode = null; // a mode the panel already asked the companion to take
+  // A mode a switch just confirmed, shown until the tutor's own config event
+  // says the same (that event can arrive after the answer to the switch, and
+  // the pressed button must not flick back to the old mode meanwhile). It
+  // lapses on its own if no event ever agrees.
+  let confirmedMode = null;
+  let confirmedTimer = 0;
+  function confirmMode(mode) {
+    confirmedMode = mode;
+    clearTimeout(confirmedTimer);
+    confirmedTimer = setTimeout(() => {
+      confirmedMode = null;
+      scheduleRender();
+    }, 8000);
+  }
+
+  // What the tutor is in now: the mode being switched to, else the one just
+  // confirmed, else what the tutor reported, else what the extension has saved.
+  function currentMode() {
+    const config = state.companionOnline ? state.displayConfig : null;
+    return switchingMode || confirmedMode || (config && config.mode) || wantedMode || "tutor";
+  }
+
+  async function relayModeSwitch(mode) {
+    const res = await fetch(`${RELAY_BASE}/panel/switch-mode`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(SWITCH_TIMEOUT_MS),
+    });
+    let body = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    if (res.status === 200 && body && body.ok) return { ok: true };
+    if (res.status === 503) return { ok: false, message: "The helper app isn't running, so the mode wasn't switched." };
+    if (res.status === 504) return { ok: false, message: "The switch is waiting for the tutor's current reply." };
+    // A helper from before modes has no such route.
+    if (res.status === 404) return { ok: false, message: "This helper is too old to switch modes. Update it in Settings (the gear above)." };
+    const message = body && body.error && typeof body.error.message === "string" ? body.error.message : "Couldn't switch modes.";
+    return { ok: false, message };
+  }
+
+  async function chooseMode(mode) {
+    if (switchingMode || mode === currentMode()) return;
+    switchingMode = mode;
+    showHint("");
+    scheduleRender();
+    try {
+      let result;
+      if (transport === relayTransport) {
+        try {
+          result = await relayModeSwitch(mode);
+        } catch {
+          result = { ok: false, message: "The helper app didn't answer, so the mode wasn't switched." };
+        }
+        // The extension keeps the same setting, so both agree.
+        if (result.ok) postToWorker({ type: "mode-switched", mode });
+      } else {
+        result = await workerRequest("switch-mode", { mode });
+      }
+      if (result.ok) {
+        wantedMode = mode;
+        confirmMode(mode);
+      } else showHint(result.message || "Couldn't switch modes.");
+    } catch {
+      showHint("Couldn't switch modes. Try again.");
+    } finally {
+      switchingMode = null;
+      scheduleRender();
+    }
+  }
+
+  // The helper's companion keeps its own copy of the mode. If it reports one
+  // other than the extension's (the mode was changed while the browser runtime
+  // was in use, then the helper took over), the panel asks it to follow, once.
+  function reconcileMode(companionMode) {
+    if (!wantedMode || switchingMode || companionMode === wantedMode || reconciledMode === wantedMode) return;
+    reconciledMode = wantedMode;
+    relayModeSwitch(wantedMode).catch(() => {});
   }
 
   async function relaySwitch(id) {
@@ -3667,7 +4052,7 @@
     // The relay stopped waiting, but the companion may still switch.
     if (res.status === 504) return { ok: false, unsettled: true };
     const message = body && body.error && typeof body.error.message === "string" ? body.error.message : "Couldn't switch models.";
-    return { ok: false, message };
+    return { ok: false, message, code: body && body.error ? body.error.code : undefined };
   }
 
   function showHint(text) {
@@ -3700,6 +4085,11 @@
       if (followUp || (entry.runtime === "helper" && transport === relayTransport)) {
         try {
           result = await relaySwitch(id);
+          // The helper keeps its own copy of the saved models, which can lag
+          // behind the menu's: send it the list and try once more.
+          if (!result.ok && result.code === "unknown" && (await syncWithTimeout())) {
+            result = await relaySwitch(id);
+          }
         } catch {
           result = { ok: false, unsettled: true };
         }
@@ -3738,6 +4128,21 @@
     scheduleRender();
   }
 
+  // The extension's chosen model runs through the helper (a local model does
+  // whenever the helper is installed), but the companion may still be on
+  // another one: it is asked, once for each pair, to take the chosen one.
+  let reconciledProfile = null;
+  function reconcileProfile(companionProfile) {
+    const wanted = activeProfileId;
+    const entry = activeEntry();
+    if (!wanted || !entry || entry.runtime !== "helper" || switching || unsettledSwitch) return;
+    if (companionProfile === wanted) return;
+    const pair = `${wanted}|${companionProfile}`;
+    if (reconciledProfile === pair) return;
+    reconciledProfile = pair;
+    setTimeout(() => chooseProfile(wanted, { followUp: true }), 0);
+  }
+
   // ---- transports ----------------------------------------------------------
   //
   // A transport follows the tutor's events (start/stop) and sends a typed
@@ -3762,6 +4167,12 @@
       setTimeout(() => chooseProfile(id, { followUp: true }), 0);
     }
     if (event.type === "config" && transport === relayTransport && typeof event.profile === "string") noteCompanionProfile(event.profile);
+    if (event.type === "config" && transport === relayTransport && typeof event.profile === "string") reconcileProfile(event.profile);
+    if (event.type === "config") {
+      const reported = event.mode === "interviewer" ? "interviewer" : "tutor";
+      if (confirmedMode && reported === confirmedMode) confirmedMode = null;
+      if (transport === relayTransport) reconcileMode(reported);
+    }
     const affected = applyEvent(state, event);
     if (event.type === "turn-end" && !suppressUnread && !active && affected === currentSlug()) setUnread(true);
     noteApplied(affected);
@@ -3958,6 +4369,7 @@
       }
       if (message.type === "runtime") {
         providerChosen = message.chosen !== false;
+        wantedMode = message.mode === "interviewer" ? "interviewer" : "tutor";
         useTransport(message.runtime === "extension" ? extensionTransport : relayTransport);
       } else if (message.type === "helper") {
         helperState = typeof message.state === "string" ? message.state : null;

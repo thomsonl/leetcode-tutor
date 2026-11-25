@@ -155,6 +155,7 @@ export class LocalBackend {
     probe = probeServer,
     windowSetting = DEFAULT_WINDOW_SETTING,
     systemMessage = TUTOR_SYSTEM_MESSAGE,
+    modelResolver = null,
   }) {
     if (!model) {
       throw new Error(
@@ -163,6 +164,9 @@ export class LocalBackend {
     }
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.model = model;
+    // Turns a saved model (a family such as "luna") into the newest real one
+    // before a request; null leaves the model as it is.
+    this.modelResolver = modelResolver;
     this.apiKey = apiKey;
     this.maxHistoryTurns = maxHistoryTurns;
     // Explicit 'native'/'openai' wins; null means "decide from the probe",
@@ -436,7 +440,8 @@ export class LocalBackend {
   // the raw reply parts `{ content, reasoning, finishReason, promptTokens }`.
   // A subclass speaking another API (anthropic-backend.js) overrides only
   // this.
-  request(onChunk, messages, options = {}) {
+  async request(onChunk, messages, options = {}) {
+    if (this.modelResolver) this.model = await this.modelResolver(this.model);
     return this.apiStyle === 'native'
       ? this.requestNative(onChunk, messages, options)
       : this.requestOpenAI(onChunk, messages, options);

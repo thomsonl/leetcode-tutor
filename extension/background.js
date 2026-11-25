@@ -21,10 +21,14 @@
 // API. No message to a content script carries one (tutor-service.js).
 
 import { createTutorService, SETTINGS_KEY } from "./shared/tutor-service.js";
-import { normalizeSettings } from "./shared/extension-settings.js";
-import { createHelperLauncher } from "./shared/helper-launcher.js";
+import { normalizeSettings, setHelperAvailable } from "./shared/extension-settings.js";
+import { createHelperLauncher, HELPER_HOST_NAME } from "./shared/helper-launcher.js";
+import { MIN_HELPER_VERSION, helperTooOld } from "./shared/helper-version.js";
+import { createExtensionUpdater } from "./shared/extension-update.js";
 import { createSolvedService } from "./shared/solved.js";
 import { createNativeSetup } from "./shared/native-setup.js";
+import { registerUninstallPage } from "./shared/uninstall-page.js";
+import { createUpdateNotice } from "./shared/update-notice.js";
 
 const api = typeof browser !== "undefined" ? browser : chrome;
 const PANEL_PORT = "lc-tutor-panel";
@@ -33,7 +37,34 @@ const NATIVE = { permissions: ["nativeMessaging"] };
 // How long the setup reload waits after telling the panels about it.
 const SETUP_NOTICE_FLUSH_MS = 300;
 
+// Whether this browser session already looked for a newer helper (storage.session
+// lasts until the browser closes; without it, once per worker start).
+let sessionUpdateSeen = false;
+const SESSION_UPDATE_KEY = "helperUpdateChecked";
+const sessionUpdate = {
+  async done() {
+    try {
+      if (api.storage && api.storage.session) {
+        const stored = await api.storage.session.get(SESSION_UPDATE_KEY);
+        return Boolean(stored && stored[SESSION_UPDATE_KEY]);
+      }
+    } catch {
+      // fall back to this worker's own memory
+    }
+    return sessionUpdateSeen;
+  },
+  async mark() {
+    sessionUpdateSeen = true;
+    try {
+      if (api.storage && api.storage.session) await api.storage.session.set({ [SESSION_UPDATE_KEY]: true });
+    } catch {
+      // this worker's own memory still holds it
+    }
+  },
+};
+
 const launcher = createHelperLauncher({
+  sessionUpdate,
   connectNative: (name) => api.runtime.connectNative(name),
   // Firefox puts the reason on the port, Chrome in runtime.lastError.
   lastError: (port) =>
@@ -68,6 +99,26 @@ function optionsWant() {
   clearTimeout(optionsWantTimer);
   optionsWantTimer = setTimeout(() => refreshHelper(), OPTIONS_WANT_MS + 100);
 }
+// Whether the browser can start the helper, which decides where a local
+// model runs (shared/extension-settings.js runtimeFor). Asked of the host
+// itself at most once a minute, since asking starts it for a moment.
+let helperAvailable = false;
+let helperProbedAt = 0;
+async function updateHelperAvailability(granted) {
+  let next = false;
+  if (granted && typeof api.runtime.connectNative === "function") {
+    if (launcher.view().state === "running") next = true;
+    else if (Date.now() - helperProbedAt > 60000) {
+      helperProbedAt = Date.now();
+      next = await hostAnswers();
+    } else next = helperAvailable;
+  }
+  if (next === helperAvailable) return;
+  helperAvailable = next;
+  setHelperAvailable(next);
+  await service.runtimeChanged();
+}
+
 async function refreshHelper() {
   let granted = false;
   try {
@@ -75,6 +126,7 @@ async function refreshHelper() {
   } catch {
     granted = false;
   }
+  await updateHelperAvailability(granted);
   const wanted = (runtime === "helper" && chosen) || Date.now() < optionsWantUntil;
   const hasApi = typeof api.runtime.connectNative === "function";
   await nativeSetup.check(granted);
@@ -122,6 +174,9 @@ const nativeSetup = createNativeSetup({
   },
 });
 
+// What the options page sends to look for, install or stop installing a newer helper.
+const HELPER_UPDATE_MESSAGES = new Set(["lc-tutor:helper-update-check", "lc-tutor:helper-update", "lc-tutor:helper-auto-update"]);
+
 // The options page asks for the helper's state; panels hear it so an offline
 // panel can point to Settings.
 async function helperView() {
@@ -134,8 +189,12 @@ async function helperView() {
   // `nativeApi`: whether this worker can reach the helper at all; `native`:
   // 'pending' while the reload that fixes a missing API is coming, 'stuck'
   // when it did not help (see shared/native-setup.js).
+  const view = launcher.view();
   return {
-    ...launcher.view(),
+    ...view,
+    // The helper is older than this version of the extension works with.
+    helperOld: helperTooOld(view.host && view.host.version),
+    minHelperVersion: MIN_HELPER_VERSION,
     runtime,
     permission: granted,
     nativeApi: typeof api.runtime.connectNative === "function",
@@ -149,7 +208,7 @@ launcher.onChange((view) => {
   service.refreshProfiles();
   for (const port of panelPorts) {
     try {
-      port.postMessage({ type: "helper", state: view.wanted ? view.state : null });
+      port.postMessage({ type: "helper", state: view.wanted ? (view.updating ? "updating" : view.state) : null });
     } catch {
       // gone
     }
@@ -189,8 +248,40 @@ async function helperProblem(current) {
     granted = false;
   }
   if (!granted || typeof api.runtime.connectNative !== "function") return "Helper app not set up yet";
-  if (launcher.view().state === "not-installed") return "Helper app not installed";
+  if (launcher.view().state === "not-installed") {
+    // That state sticks until something asks again (the helper may have been
+    // installed since), so look for the host before saying it is missing.
+    if (!(await hostAnswers())) return "Helper app not installed";
+    launcher.retry();
+  }
   return null;
+}
+
+// Whether the browser can start the helper's host right now: a connection
+// that is not refused straight away. Closed again at once.
+function hostAnswers() {
+  return new Promise((resolve) => {
+    let port = null;
+    try {
+      port = api.runtime.connectNative(HELPER_HOST_NAME);
+    } catch {
+      resolve(false);
+      return;
+    }
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      try {
+        port.disconnect();
+      } catch {
+        // already closed
+      }
+      resolve(ok);
+    };
+    port.onDisconnect.addListener(() => finish(false));
+    setTimeout(() => finish(true), 500);
+  });
 }
 
 const service = createTutorService({
@@ -217,6 +308,23 @@ const solved = createSolvedService({
   extensionOrigin: new URL(api.runtime.getURL("")).origin,
   log: (text) => console.warn(`[leetcode-capture] ${text}`),
 });
+// The toolbar badge and the note that an update happened.
+const updateNotice = createUpdateNotice({
+  storage: {
+    get: (keys) => api.storage.local.get(keys),
+    set: (items) => api.storage.local.set(items),
+    remove: (keys) => api.storage.local.remove(keys),
+  },
+  badge: {
+    set: async (text) => {
+      if (!api.action || !api.action.setBadgeText) return;
+      await api.action.setBadgeText({ text });
+      if (text && api.action.setBadgeBackgroundColor) await api.action.setBadgeBackgroundColor({ color: "#2cbb5d" });
+    },
+  },
+  version: () => api.runtime.getManifest().version,
+  log: (text) => console.warn(`[leetcode-capture] ${text}`),
+});
 const SOLVED_MESSAGES = new Set(["lc-tutor:accepted", "lc-tutor:solved-set", "lc-tutor:star-set", "lc-tutor:set-list", "lc-tutor:practice", "lc-tutor:sync-check", "lc-tutor:sync-solved"]);
 
 async function syncNow() {
@@ -239,6 +347,24 @@ async function syncNow() {
     }
   }
   return { ok: false, reason: reached ? "failed" : "no-tab" };
+}
+
+// Whether LeetCode is signed in, asked of the first problem tab that answers.
+// "no-tab" when none is open, "unknown" when one is open but would not say.
+async function loginState() {
+  const tabs = (await api.tabs.query({})).slice(0, 200);
+  let reached = false;
+  for (const tab of tabs) {
+    let answer = null;
+    try {
+      answer = await api.tabs.sendMessage(tab.id, { type: "lc-tutor:login-state" });
+    } catch {
+      answer = null;
+    }
+    if (answer) reached = true;
+    if (answer && answer.ok === true) return { ok: true, state: answer.signedIn ? "signed-in" : "signed-out" };
+  }
+  return { ok: true, state: reached ? "unknown" : "no-tab" };
 }
 
 // The extension's page on one of its tabs ("settings" or "progress"): a page
@@ -285,13 +411,36 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     syncNow().then(sendResponse, () => sendResponse({ ok: false, reason: "failed" }));
     return true;
   }
+  // The Progress tab asks whether LeetCode is signed in, to colour the button.
+  // An update the extension noticed (shared/update-notice.js): the Tutor tab's
+  // card and the Changelog tab ask for it, and tell the worker when it is seen.
+  if (message && message.type === "lc-tutor:update-notice") {
+    updateNotice.pending().then((notice) => sendResponse({ ok: true, notice }), () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (message && message.type === "lc-tutor:update-seen") {
+    updateNotice.seen().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (message && message.type === "lc-tutor:open-changelog") {
+    openOurPage("changelog");
+    return undefined;
+  }
+  if (message && message.type === "lc-tutor:login-state") {
+    if (!sender.url || !sender.url.startsWith(`${new URL(api.runtime.getURL("")).origin}/`)) {
+      sendResponse({ ok: false });
+      return undefined;
+    }
+    loginState().then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
   if (message && SOLVED_MESSAGES.has(message.type)) {
     solved.handleMessage(message, sender).then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
   // A Run or Submit makes its tab the active problem.
   if (message && message.type === "lc-tutor:capture" && sender.tab) launcher.markActive(sender.tab.id);
-  if (message && (message.type === "lc-tutor:helper-status" || message.type === "lc-tutor:helper-retry")) {
+  if (message && (message.type === "lc-tutor:helper-status" || message.type === "lc-tutor:helper-retry" || HELPER_UPDATE_MESSAGES.has(message.type))) {
     // Only the extension's own pages (the options page, even open in a tab),
     // never a content script on leetcode.com.
     if (!sender.url || !sender.url.startsWith(api.runtime.getURL(""))) return undefined;
@@ -304,6 +453,9 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await refreshHelper();
         launcher.retry();
       }
+      if (message.type === "lc-tutor:helper-update-check") launcher.checkUpdate();
+      if (message.type === "lc-tutor:helper-update") launcher.updateNow();
+      if (message.type === "lc-tutor:helper-auto-update") launcher.setAutoUpdate(message.enabled === true);
       return helperView();
     })().then(sendResponse, () => sendResponse(null));
     return true;
@@ -328,13 +480,15 @@ api.runtime.onConnect.addListener((port) => {
   port.onDisconnect.addListener(() => {
     panelPorts.delete(port);
     launcher.tabClosed(tab.id);
+    // A quiet moment for an update that was waiting for one.
+    extensionUpdater.tryApply();
   });
   panelPorts.add(port);
   launcher.tabOpened(tab.id, tab.url || port.sender.url);
   const view = launcher.view();
   if (view.wanted) {
     try {
-      port.postMessage({ type: "helper", state: view.state });
+      port.postMessage({ type: "helper", state: view.updating ? "updating" : view.state });
     } catch {
       // already gone
     }
@@ -363,5 +517,53 @@ if (api.permissions.onRemoved) {
 // worker would stay asleep until the next problem tab. The call at start is
 // for a worker woken by something else first (the resume record is used
 // only once either way).
-if (api.runtime.onInstalled) api.runtime.onInstalled.addListener(() => nativeSetup.reopenAfterReload());
+// Taking the extension's own update as soon as the browser has it: ask the
+// store when the browser starts, and reload to apply it when no Tutor panel or
+// extension page is open (shared/extension-update.js).
+async function extensionInUse() {
+  if (panelPorts.size > 0) return true;
+  try {
+    if (typeof api.runtime.getContexts === "function") {
+      const pages = await api.runtime.getContexts({ contextTypes: ["TAB", "POPUP", "SIDE_PANEL"] });
+      return pages.length > 0;
+    }
+  } catch {
+    return true;
+  }
+  return false;
+}
+const extensionUpdater = createExtensionUpdater({
+  runtime: api.runtime,
+  busy: extensionInUse,
+  timers: { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (id) => clearTimeout(id) },
+  log: (text) => console.warn(`[leetcode-capture] ${text}`),
+});
+if (api.runtime.onStartup) api.runtime.onStartup.addListener(() => extensionUpdater.check());
+if (api.runtime.onUpdateAvailable) api.runtime.onUpdateAvailable.addListener((details) => extensionUpdater.onUpdateAvailable(details));
+
+if (api.runtime.onInstalled) {
+  api.runtime.onInstalled.addListener((details) => {
+    nativeSetup.reopenAfterReload();
+    // An update the browser made by itself: remember it and badge the icon.
+    updateNotice.onInstalled(details).catch(() => {});
+  });
+}
 nativeSetup.reopenAfterReload();
+// The badge is gone after a browser restart; an update nobody has looked at
+// gets it back.
+updateNotice.refreshBadge().catch(() => {});
+// The toolbar icon opens the Changelog while an update is waiting to be seen,
+// and Settings otherwise.
+if (api.action && api.action.onClicked) {
+  api.action.onClicked.addListener(() => {
+    updateNotice.pending().then(
+      (note) => openOurPage(note ? "changelog" : "settings"),
+      () => openOurPage("settings")
+    );
+  });
+}
+
+// When the extension is removed from the browser's own extensions page, the
+// browser opens this page: how to remove the helper, which the extension
+// cannot do from inside a removal (shared/uninstall-page.js).
+registerUninstallPage(api.runtime);

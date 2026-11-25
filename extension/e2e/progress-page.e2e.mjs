@@ -77,7 +77,9 @@ try {
       settingsHidden: document.getElementById('panel-settings').hidden,
       sub: document.getElementById('page-sub').textContent,
       total: document.querySelector('.total').textContent,
-      levels: [...document.querySelectorAll('.levels li')].map((li) => li.textContent),
+      levels: document.querySelectorAll('.levels').length,
+      segs: [...document.querySelectorAll('#summary .bar .bar-seg')].map((x) => x.title),
+      barLabel: document.querySelector('#summary .bar').getAttribute('aria-label'),
       next: document.querySelector('.next-up').textContent,
       nextHref: document.querySelector('.next-up a').href,
       connection: getComputedStyle(document.getElementById('connection')).display,
@@ -86,9 +88,31 @@ try {
     check(m.sub === 'Your NeetCode 150 progress' && m.connection === 'none', `header: ${JSON.stringify(m)}`);
     check(m.total === '11 / 150 solved', `total (the problem off the roadmap does not count): ${m.total}`);
     const easy = NEETCODE_150.topics.flatMap((t) => t.problems).filter((p) => p.difficulty === 'Easy');
-    check(m.levels[0] === `Easy${easy.filter((p) => seed[p.slug]).length} / ${easy.length}`, `levels: ${JSON.stringify(m.levels)}`);
+    // No separate Easy / Medium / Hard row: the one bar carries it (tooltips, accessible name).
+    check(m.levels === 0, 'no difficulty counts row');
+    check(m.segs[0] === `Easy: ${easy.filter((p) => seed[p.slug]).length} solved`, `segment tooltips: ${JSON.stringify(m.segs)}`);
+    check(m.barLabel.includes(`Easy ${easy.filter((p) => seed[p.slug]).length} of ${easy.length}`), `bar name: ${m.barLabel}`);
     check(m.next === `Next up${expectedNext.title}inArrays & Hashing`, `next: ${m.next}`);
     check(m.nextHref === `https://leetcode.com/problems/${expectedNext.slug}/`, `next link: ${m.nextHref}`);
+  });
+
+  await scenario('the progress bar is filled by difficulty by default, all green by choice, and follows the choice at once', async () => {
+    const all = NEETCODE_150.topics.flatMap((t) => t.problems);
+    const solvedBy = (level) => all.filter((p) => p.difficulty === level && seed[p.slug]).length;
+    const widths = () => page.eval(`(() => { const bar = document.querySelector('#summary .bar'); return { style: bar.dataset.style || null, segs: [...bar.querySelectorAll('.bar-seg')].map((s) => [s.dataset.level, parseFloat(s.style.width), getComputedStyle(s).backgroundColor]), fill: bar.querySelector('.bar-fill') ? parseFloat(bar.querySelector('.bar-fill').style.width) : null }; })()`);
+    let m = await widths();
+    check(m.style === 'difficulty' && m.segs.length === 3 && m.fill === null, `by difficulty: ${JSON.stringify(m)}`);
+    const pct = (n) => Math.round((n / 150) * 1000) / 10;
+    check(m.segs.every(([level, width]) => width === pct(solvedBy(level))), `each segment is its share of the list: ${JSON.stringify(m.segs)} vs ${['Easy', 'Medium', 'Hard'].map((l) => pct(solvedBy(l)))}`);
+    check(new Set(m.segs.map((x) => x[2])).size === 3, `three colors: ${JSON.stringify(m.segs)}`);
+    const total = m.segs.reduce((n, x) => n + x[1], 0);
+    check(Math.abs(total - pct(11)) < 0.3, `together they are the solved share: ${total}`);
+    await browser.serviceWorkerEval(`chrome.storage.local.set({ progressBarStyle: 'green' })`);
+    await page.waitFor(`document.querySelector('#summary .bar .bar-fill') && !document.querySelector('#summary .bar .bar-seg')`, { what: 'the green bar' });
+    m = await widths();
+    check(m.fill === pct(11) && m.segs.length === 0, `green: ${JSON.stringify(m)}`);
+    await browser.serviceWorkerEval(`chrome.storage.local.remove('progressBarStyle')`);
+    await page.waitFor(`document.querySelectorAll('#summary .bar .bar-seg').length === 3`, { what: 'back to difficulty' });
   });
 
   await scenario('the graph: 18 topic nodes with solved counts, the recommended topic marked, every prerequisite line', async () => {
@@ -325,13 +349,23 @@ try {
 
   await scenario('the tab bar: arrow keys switch tabs, the address follows, the settings come back intact', async () => {
     await page.eval(`document.getElementById('tab-progress').focus()`);
-    await key(page, 'ArrowLeft');
+    await key(page, 'ArrowRight');
     const m = await page.eval(`({ hash: location.hash, focus: document.activeElement.id, settings: !document.getElementById('panel-settings').hidden, progress: document.getElementById('panel-progress').hidden, form: document.getElementById('form').getBoundingClientRect().height > 100, conn: getComputedStyle(document.getElementById('connection')).display, sub: document.getElementById('page-sub').textContent, tabindex: [document.getElementById('tab-settings').tabIndex, document.getElementById('tab-progress').tabIndex] })`);
     check(m.hash === '' && m.focus === 'tab-settings' && m.settings && m.progress && m.form && m.conn === 'flex' && m.sub === 'Tutor settings', JSON.stringify(m));
     check(JSON.stringify(m.tabindex) === '[0,-1]', `roving tabindex: ${m.tabindex}`);
     await page.screenshot(path.join(shots, 'settings-tab-dark.png'), { width: 1280, height: 700, scheme: 'dark' });
+    // On to the Changelog, then round to Progress again.
     await key(page, 'ArrowRight');
-    check(await page.eval(`location.hash === '#progress' && !document.getElementById('panel-progress').hidden`), 'back to Progress');
+    const log = await page.eval(`({ hash: location.hash, focus: document.activeElement.id, panel: !document.getElementById('panel-changelog').hidden, settings: document.getElementById('panel-settings').hidden, progress: document.getElementById('panel-progress').hidden, sub: document.getElementById('page-sub').textContent, conn: getComputedStyle(document.getElementById('connection')).display, tabindex: ['settings', 'progress', 'changelog'].map((t) => document.getElementById('tab-' + t).tabIndex) })`);
+    check(log.hash === '#changelog' && log.focus === 'tab-changelog' && log.panel && log.settings && log.progress && log.sub === "What's new" && log.conn === 'none', JSON.stringify(log));
+    check(JSON.stringify(log.tabindex) === '[-1,-1,0]', `roving tabindex: ${log.tabindex}`);
+    await key(page, 'ArrowRight');
+    check(await page.eval(`location.hash === '#progress' && !document.getElementById('panel-progress').hidden`), 'round to Progress');
+    await key(page, 'ArrowLeft');
+    check(await page.eval(`location.hash === '#changelog'`), 'back to the Changelog');
+    await key(page, 'ArrowLeft');
+    await key(page, 'ArrowLeft');
+    check(await page.eval(`location.hash === '#progress' && !document.getElementById('panel-progress').hidden`), 'and back to Progress');
   });
 
   for (const width of [400, 600, 900]) {
@@ -364,10 +398,10 @@ try {
         const drawer = document.getElementById('drawer');
         const table = drawer.querySelector('table');
         const cells = [...drawer.querySelectorAll('td, th')].filter((c) => c.scrollWidth > c.clientWidth + 1).map((c) => c.textContent);
-        return { drawer: drawer.getBoundingClientRect().width, table: table.getBoundingClientRect().right <= drawer.getBoundingClientRect().right, sideways: drawer.scrollWidth > drawer.clientWidth, cells, page: document.scrollingElement.scrollWidth - window.innerWidth };
+        return { view: document.documentElement.clientWidth, drawer: drawer.getBoundingClientRect().width, table: table.getBoundingClientRect().right <= drawer.getBoundingClientRect().right, sideways: drawer.scrollWidth > drawer.clientWidth, cells, page: document.scrollingElement.scrollWidth - window.innerWidth };
       })()`);
       check(d.table && !d.sideways && d.cells.length === 0 && d.page <= 0, `panel at ${width}: ${JSON.stringify(d)}`);
-      if (width <= 560) check(d.drawer === width, `full width panel: ${d.drawer}`);
+      if (width <= 560) check(d.drawer === d.view, `full width panel: ${d.drawer}`);
       await page.screenshot(path.join(shots, `drawer-${width}-dark.png`), { width, height: 900, scheme: 'dark' });
       await page.screenshot(path.join(shots, `drawer-${width}-light.png`), { width, height: 900, scheme: 'light' });
       await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });

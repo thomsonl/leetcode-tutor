@@ -1294,13 +1294,38 @@ export function unlockedTopics(roadmap, solved) {
   );
 }
 
-// What to do next, in the list's order: the first unsolved problems of the
-// earliest topic that is unlocked and not finished.
+// How many steps each topic is from the start of the graph, counted the way a
+// breadth-first walk counts them: a topic with no prerequisite is 0, any other
+// is one more than its nearest prerequisite. A list without edges is all 0.
+export function topicDepths(roadmap) {
+  const depth = new Map();
+  const parents = new Map(roadmap.topics.map((t) => [t.id, roadmap.edges.filter(([, to]) => to === t.id).map(([from]) => from)]));
+  const walk = (id, seen) => {
+    if (depth.has(id)) return depth.get(id);
+    const from = parents.get(id) || [];
+    if (!from.length || seen.has(id)) return 0;
+    seen.add(id);
+    const d = 1 + Math.min(...from.map((p) => walk(p, seen)));
+    seen.delete(id);
+    depth.set(id, d);
+    return d;
+  };
+  for (const t of roadmap.topics) depth.set(t.id, walk(t.id, new Set()));
+  return depth;
+}
+
+// What to do next: the first unsolved problems of the earliest topic that is
+// unlocked and not finished. Earliest is breadth first: everything that is one
+// step from the start comes before anything two steps away (so Stack, which
+// follows Arrays & Hashing directly, comes before Sliding Window, which
+// follows Two Pointers), and within a step the list's own order decides.
 export function nextOnRoadmap(roadmap, solved, { count = 1 } = {}) {
   const done = new Set(solved);
   const open = unlockedTopics(roadmap, done);
+  const depth = topicDepths(roadmap);
+  const order = roadmap.topics.map((topic, i) => ({ topic, i })).sort((a, b) => depth.get(a.topic.id) - depth.get(b.topic.id) || a.i - b.i);
   const out = [];
-  for (const topic of roadmap.topics) {
+  for (const { topic } of order) {
     if (!open.has(topic.id)) continue;
     for (const p of topic.problems) {
       if (!done.has(p.slug)) out.push(p);

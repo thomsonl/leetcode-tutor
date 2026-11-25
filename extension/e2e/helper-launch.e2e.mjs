@@ -89,6 +89,37 @@ async function scenario(name, fn) {
     console.log(`FAIL ${name}\n     ${err.message}`);
   }
 }
+// Picks a model on the options page the way a student does: the row of that
+// provider if the list has one, otherwise a new one added for it.
+async function pickModel(options, provider, labelText, model = '') {
+  const id = await options.eval(`(() => { const r = [...document.querySelectorAll('#profiles .profile')].find((p) => p.querySelector('.profile-meta').textContent.startsWith(${JSON.stringify(labelText)})); return r ? r.dataset.id : null; })()`);
+  if (id) {
+    await options.eval(`document.getElementById('profile-${id}-radio').click()`);
+    return;
+  }
+  if (await options.eval(`!document.getElementById('add-provider')`)) await options.click('#add-toggle');
+  await options.eval(`(() => { const s = document.getElementById('add-provider'); s.value = ${JSON.stringify(provider)}; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  if (model) {
+    await options.eval(`(() => {
+      const s = document.getElementById('add-model');
+      if (s.tagName === 'SELECT') { s.value = [...s.options].some((o) => o.value === ${JSON.stringify(model)}) ? ${JSON.stringify(model)} : '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); }
+      if (document.getElementById('add-model').tagName === 'INPUT') document.getElementById('add-model').value = ${JSON.stringify(model)};
+    })()`);
+  }
+  await options.click('#add-profile-button');
+}
+// A field left after an edit: the page saves it (it has no Save button).
+// (The provider card has no model field now; any form field's change saves the form.)
+const leaveClaudeModel = (o) => o.eval(`document.getElementById('autoClearContext').dispatchEvent(new Event('change', { bubbles: true }))`);
+// Adds a model row through the add row, whatever the list already holds.
+async function addModel(options, provider, model) {
+  if (await options.eval(`!document.getElementById('add-provider')`)) await options.click('#add-toggle');
+  await options.eval(`(() => { const s = document.getElementById('add-provider'); s.value = ${JSON.stringify(provider)}; s.dispatchEvent(new Event('change', { bubbles: true })); const m = document.getElementById('add-model'); m.value = ${JSON.stringify(model)}; })()`);
+  await options.click('#add-profile-button');
+}
+const hasRow = (name) => `[...document.querySelectorAll('#profiles .profile-name')].some((n) => n.textContent === ${JSON.stringify(name)})`;
+const formReady = `!document.getElementById('form').hasAttribute('data-disabled')`;
+
 function check(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -113,8 +144,8 @@ const seenPids = new Set();
 async function openOptions(browser) {
   const options = await browser.openPage('about:blank');
   await options.send('Page.navigate', { url: `chrome-extension://${browser.extensionId}/settings.html` });
-  await options.waitFor(`document.querySelector('input[name="provider"][value="claude"]')`, { what: 'the options page' });
-  await options.eval(`document.querySelector('input[name="provider"][value="claude"]').click()`);
+  await options.waitFor(`document.getElementById('add-provider') || document.getElementById('add-toggle')`, { what: 'the options page' });
+  await pickModel(options, 'claude', 'Claude subscription');
   await options.waitFor(`!document.getElementById('helper-card').hidden`, { what: 'the Helper section' });
   return options;
 }
@@ -168,7 +199,7 @@ async function showPanel(page) {
 }
 
 // ---- 2. granted: not installed, then installed ----------------------------
-const copy = extensionCopy(extensionDir, { extraPermissions: ['nativeMessaging'], extraHosts: [`http://localhost:${relayPort}/*`] });
+const copy = extensionCopy(extensionDir, { extraPermissions: ['nativeMessaging'], extraHosts: [`http://localhost:${relayPort}/*`, 'http://localhost/*', 'https://api.anthropic.com/*'] });
 // Requests a content script makes do not pass through the page's CDP Fetch
 // interception, so the copy's relay address itself points at the test port.
 for (const file of ['panel.js', 'content.js', 'settings.js']) {
@@ -239,17 +270,77 @@ try {
   });
 
   await scenario('with the helper running, the Claude subscription can be saved', async () => {
-    await options.waitFor(`!document.getElementById('save').disabled`, { what: 'Save to be enabled', timeout: 15000 });
-    await options.click('#save');
+    await options.waitFor(formReady, { what: 'the form to be ready', timeout: 15000 });
+    await leaveClaudeModel(options);
     await options.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the save', timeout: 15000 });
+  });
+
+  await scenario('a local model runs through the installed helper, so Ollama needs no OLLAMA_ORIGINS', async () => {
+    await pickModel(options, 'local', 'Local model', 'llama3.2');
+    await options.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the local model saved', timeout: 20000 });
+    const view = await options.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:helper-status' })`);
+    check(view.runtime === 'helper', `runtime: ${view.runtime}`);
+    // Back to Claude for what follows.
+    await pickModel(options, 'claude', 'Claude subscription');
+    await options.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'Claude saved again', timeout: 20000 });
+  });
+
+  await scenario('the Helper light: red when too old to work, yellow when it works but an update is out, green otherwise', async () => {
+    // The status the page gets is changed in the page, since the real helper is current.
+    await options.eval(`(() => {
+      const orig = chrome.runtime.sendMessage.bind(chrome.runtime);
+      chrome.runtime.sendMessage = async (m, ...rest) => {
+        const res = await orig(m, ...rest);
+        if (window.__helperTweak && m && m.type === 'lc-tutor:helper-status' && res) return window.__helperTweak(structuredClone(res));
+        return res;
+      };
+    })()`);
+    const light = () => options.eval(`({ text: document.getElementById('helper-state-text').textContent, state: document.getElementById('helper-state').getAttribute('data-state'), ok: document.getElementById('helper-state').hasAttribute('data-ok') })`);
+    const show = async (tweak, text) => {
+      await options.eval(`window.__helperTweak = ${tweak}`);
+      await options.waitFor(`document.getElementById('helper-state-text').textContent === ${JSON.stringify(text)}`, { what: text, timeout: 15000 });
+      return light();
+    };
+    let l = await show(`(r) => { r.helperOld = true; return r; }`, 'Update needed');
+    check(l.state === 'bad' && !l.ok, `too old: ${JSON.stringify(l)}`);
+    await options.screenshot(path.join(shots, 'helper-light-red.png'), { width: 900, height: 1100 });
+    l = await show(`(r) => { r.helperOld = false; r.host.update = { current: r.host.version, latest: '9.9.9', newer: true, auto: true }; return r; }`, 'Update available');
+    check(l.state === 'warn' && !l.ok, `update out: ${JSON.stringify(l)}`);
+    await options.screenshot(path.join(shots, 'helper-light-yellow.png'), { width: 900, height: 1100 });
+    l = await show(`null`, 'Running');
+    check(l.state === null && l.ok, `current: ${JSON.stringify(l)}`);
+  });
+
+  await scenario('the Helper section shows the helper\'s version and the automatic update switch, which the helper remembers', async () => {
+    const where = layout({ platform: 'linux', home, env: {} });
+    const configFile = path.join(where.appDir, 'helper-config.json');
+    await options.waitFor(`document.getElementById('helper-version-line')`, { what: 'the version line', timeout: 15000 });
+    const line = await options.eval(`document.getElementById('helper-version-line').textContent`);
+    check(/^Version \d+\.\d+\.\d+/.test(line), `version line: ${line}`);
+    check(!(await options.eval(`document.querySelector('#helper-body').textContent.includes('too old')`)), 'this helper is not called too old');
+    check(await options.eval(`document.getElementById('helper-auto-update').checked`), 'automatic update is on by default');
+    check(JSON.parse(fs.readFileSync(configFile, 'utf8')).autoUpdate === true, 'the installer wrote the default');
+    await options.eval(`document.getElementById('helper-auto-update').click()`);
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline && JSON.parse(fs.readFileSync(configFile, 'utf8')).autoUpdate !== false) await sleep(200);
+    check(JSON.parse(fs.readFileSync(configFile, 'utf8')).autoUpdate === false, 'turning it off reached the helper\'s config');
+    check(JSON.parse(fs.readFileSync(configFile, 'utf8')).root, 'the recorded root is kept');
+    await options.waitFor(`!document.getElementById('helper-auto-update').checked`, { what: 'the switch to stay off', timeout: 10000 });
+    await options.screenshot(path.join(shots, 'helper-update-section.png'), { width: 900, height: 1100 });
+    // The student's choice is kept the way it was found for the later scenarios.
+    await options.eval(`document.getElementById('helper-auto-update').click()`);
   });
 
   await scenario('closing the last problem tab stops everything after the 30 s grace, not before', async () => {
     await page.send('Page.close');
     page = null;
     // The options page holds the helper while its form shows a provider that
-    // runs through it, so the form leaves that provider first.
-    await options.click('input[name=provider][value=local]');
+    // runs through it, so the form leaves that provider first. An API key
+    // provider runs in the browser; with no key typed the choice stays in the
+    // form unsaved (a saved one would end the helper's work at once). (A local
+    // model is not used for this: with the helper installed it runs through it.)
+    await pickModel(options, 'anthropic', 'Anthropic API key');
+    await options.waitFor(`/Enter the Anthropic API key/.test(document.getElementById('save-result').textContent)`, { what: 'the note that the key is missing', timeout: 10000 });
     await sleep(3000);
     const view = await options.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:helper-status' })`);
     check(view.tabs === 0 && view.state === 'running', `right after closing: ${JSON.stringify(view)}`);
@@ -268,14 +359,14 @@ try {
     fs.rmSync(path.join(browser.profile, 'NativeMessagingHosts'), { recursive: true, force: true });
     page = await openProblem(browser);
     await offlineWithPointer();
-    await options.click('input[name=provider][value=claude]');
+    await pickModel(options, 'claude', 'Claude subscription');
     await options.waitFor(`document.getElementById('helper-check')`, { what: 'the Helper section', timeout: 10000 });
     await options.eval(`document.getElementById('helper-check').click()`);
     // A press must visibly do something: busy button right away, then a note.
     const busy = await options.eval(`({ text: document.getElementById('helper-check').textContent, disabled: document.getElementById('helper-check').disabled })`);
     check(busy.text === 'Checking...' && busy.disabled, `busy button: ${JSON.stringify(busy)}`);
     await options.waitFor(`document.getElementById('helper-state-text').textContent === 'Not installed'`, { what: 'Not installed again', timeout: 10000 });
-    await options.waitFor(`/Still not installed/.test(document.getElementById('helper-check-note')?.textContent || '')`, { what: 'the Check again note', timeout: 10000 });
+    await options.waitFor(`/Not installed yet/.test(document.getElementById('helper-check-note')?.textContent || '')`, { what: 'the Check again note', timeout: 10000 });
     const after = await options.eval(`document.getElementById('helper-check').textContent`);
     check(after === 'Check again', `button after: ${after}`);
   });
@@ -291,7 +382,7 @@ try {
     for (const pid of pids) seenPids.add(pid);
     return pids;
   };
-  await scenario('a local model saved, then Claude chosen in the form: the helper starts by itself and Save enables', async () => {
+  await scenario('a local model saved, then Claude chosen in the form: the helper starts by itself and the form is ready', async () => {
     const saved = await options.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:settings-save', params: { patch: { provider: 'local', runtime: 'extension', providers: { local: { baseUrl: 'http://localhost:${relayPort}/v1', model: 'llama3.2' } } } } })`);
     check(saved && saved.ok, `saved local: ${JSON.stringify(saved)}`);
     const before = await options.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:helper-status' })`);
@@ -310,21 +401,23 @@ try {
     });
     const pids = await helperPids(second);
     check(pids.length === 2 && pids.every(isAlive), `relay and companion: ${JSON.stringify(pids)}`);
-    await second.waitFor(`!document.getElementById('save').disabled`, { what: 'Save to be enabled', timeout: 15000 });
+    await second.waitFor(formReady, { what: 'the form to be ready', timeout: 15000 });
   });
 
-  await scenario('switching the form back to the local model lets the helper stop, with nothing saved', async () => {
+  await scenario('switching to a model that runs in the browser lets the helper stop', async () => {
     const pids = await helperPids(second);
-    await second.click('input[name=provider][value=local]');
+    await pickModel(second, 'anthropic', 'Anthropic API key');
+    await second.type('#anthropic-apiKey', 'sk-ant-test-key-0000');
+    await second.eval(`document.getElementById('anthropic-apiKey').dispatchEvent(new Event('change', { bubbles: true }))`);
     const deadline = Date.now() + 40000;
     while (Date.now() < deadline && pids.some(isAlive)) await sleep(250);
-    check(!pids.some(isAlive), `the helper still runs for a local model user: ${JSON.stringify(await second.eval(`({ card: document.getElementById('helper-card').hidden, ext: (document.getElementById('local-runtime-extension') || {}).checked, help: (document.getElementById('local-runtime-helper') || {}).checked })`))} ${JSON.stringify(await second.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:helper-status' })`))}`);
+    check(!pids.some(isAlive), `the helper still runs for a browser-model user: ${JSON.stringify(await second.eval(`({ card: document.getElementById('helper-card').hidden, ext: (document.getElementById('local-runtime-extension') || {}).checked, help: (document.getElementById('local-runtime-helper') || {}).checked })`))} ${JSON.stringify(await second.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:helper-status' })`))}`);
     const view = await second.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:helper-status' })`);
     check(view.runtime === 'extension', `runtime: ${view.runtime}`);
   });
 
   await scenario('choosing Claude again starts the helper, and saving it makes the helper the runtime', async () => {
-    await second.click('input[name=provider][value=claude]');
+    await pickModel(second, 'claude', 'Claude subscription');
     await second.waitFor(`document.getElementById('helper-state-text').textContent === 'Running'`, { what: 'Running again', timeout: 20000 });
     // The page still holds the companion's answer from before the helper
     // stopped, so Save is enabled at once; wait for the new relay and
@@ -337,8 +430,8 @@ try {
     }
     await helperPids(second);
     await second.waitFor(`fetch('http://localhost:${relayPort}/settings/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ method: 'get', params: {} }) }).then((r) => r.ok, () => false)`, { what: 'the companion to answer', timeout: 15000 });
-    await second.waitFor(`!document.getElementById('save').disabled`, { what: 'Save to be enabled', timeout: 15000 });
-    await second.click('#save');
+    // The choice made while the helper was down saves itself once it runs.
+    await second.waitFor(formReady, { what: 'the form to be ready', timeout: 15000 });
     await second.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the save', timeout: 30000 }).catch(async (err) => {
       throw new Error(`${err.message}: ${await second.eval(`document.getElementById('save-result').textContent + ' | ' + document.getElementById('helper-state-text').textContent`)}`);
     });
@@ -357,7 +450,7 @@ try {
       }
     }
     await sleep(500);
-    await second.click('#save');
+    await leaveClaudeModel(second);
     await second.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the save after a restart', timeout: 40000 }).catch(async (err) => {
       throw new Error(`${err.message}: ${await second.eval(`document.getElementById('save-result').textContent`)}`);
     });
@@ -400,7 +493,7 @@ try {
 // (even a two-file one), so the worker's reload is counted instead of done,
 // and the worker start after it is a second browser on a copy of the
 // profile, which runs the same start-up code.
-const copy3 = extensionCopy(extensionDir, { extraPermissions: ['nativeMessaging'], extraHosts: [`http://localhost:${relayPort}/*`] });
+const copy3 = extensionCopy(extensionDir, { extraPermissions: ['nativeMessaging'], extraHosts: [`http://localhost:${relayPort}/*`, 'http://localhost/*'] });
 for (const file of ['panel.js', 'content.js', 'settings.js']) {
   const target = path.join(copy3.dir, file);
   fs.writeFileSync(target, fs.readFileSync(target, 'utf8').replaceAll('http://localhost:8135', `http://localhost:${relayPort}`));
@@ -431,7 +524,7 @@ try {
   });
 
   let options3 = await openOptions(browser3);
-  await options3.eval(`(() => { const s = document.getElementById('claude-model'); s.value = 'opus'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await addModel(options3, 'claude', 'opus');
   await browser3.serviceWorkerEval(`(() => { self.__reloads = 0; chrome.runtime.reload = () => { self.__reloads += 1; }; delete chrome.runtime.connectNative; })()`);
   await options3.eval(`delete chrome.runtime.connectNative`);
   await watchLabels(options3);
@@ -440,7 +533,7 @@ try {
     await options3.waitFor(`document.getElementById('helper-state-text').textContent === 'Finishing setup'`, { what: 'Finishing setup', timeout: 12000 });
     const info = await options3.eval(`({ labels: window.__labels, body: document.getElementById('helper-body').textContent })`);
     check(!info.labels.includes('Not installed'), JSON.stringify(info.labels));
-    check(/opens again by itself/.test(info.body), info.body);
+    check(/reopens by itself/.test(info.body), info.body);
     await options3.eval(`document.getElementById('helper-card').scrollIntoView({ block: 'center' })`);
     await options3.screenshot(path.join(shots, 'helper-finishing-setup.png'), { width: 900, height: 1100 });
   });
@@ -466,7 +559,7 @@ try {
     fs.cpSync(oldProfile, dir, { recursive: true, filter: (src) => !/^Singleton/.test(path.basename(src)) }),
 });
 
-  await scenario('the started worker opens Settings again with the unsaved choice, and the helper runs', async () => {
+  await scenario('the started worker opens Settings again with the choice, and once the helper runs it is saved', async () => {
     const deadline = Date.now() + 15000;
     let target = null;
     while (Date.now() < deadline && !target) {
@@ -475,38 +568,36 @@ try {
     }
     check(target, 'the options page did not open');
     options3 = await browser3.attachPage((url) => url === target.url);
-    await options3.waitFor(`document.querySelector('input[name="provider"][value="claude"]') && document.querySelector('input[name="provider"][value="claude"]').checked`, { what: 'Claude chosen again', timeout: 10000 }).catch(async (err) => {
+    await options3.waitFor(`document.querySelector('#providers .provider')`, { what: 'Claude chosen again', timeout: 10000 }).catch(async (err) => {
       // Say what the reopened page held, so a timeout is diagnosable.
-      const seen = await options3.eval(`JSON.stringify({ checked: [...document.querySelectorAll('input[name="provider"]')].filter((r) => r.checked).map((r) => r.value), note: document.getElementById('save-result') && document.getElementById('save-result').textContent, helper: document.getElementById('helper-state-text') && document.getElementById('helper-state-text').textContent, ready: document.readyState })`).catch((e) => String(e));
+      const seen = await options3.eval(`JSON.stringify({ title: (document.querySelector('#providers .provider-hint') || {}).textContent, note: document.getElementById('save-result') && document.getElementById('save-result').textContent, helper: document.getElementById('helper-state-text') && document.getElementById('helper-state-text').textContent, ready: document.readyState })`).catch((e) => String(e));
       const stored = await options3.eval(`chrome.storage.local.get(null).then((v) => JSON.stringify({ resume: v.settingsResume, reload: v.nativeReload }))`).catch((e) => String(e));
       throw new Error(`${err.message}: page ${seen}, storage ${stored}, console ${(options3.console || []).join(' | ')}`);
     });
-    // While the helper is missing the wait note says it all; the "not saved
-    // yet" note comes once the helper runs, never next to the wait note.
+    // While the helper is missing the wait note says it all; once the helper
+    // runs the choice is saved by itself, never next to the wait note.
     await options3.waitFor(`document.getElementById('helper-state-text').textContent === 'Running'`, { what: 'Running', timeout: 20000 });
-    await options3.waitFor(`/not saved yet/.test(document.getElementById('save-result').textContent)`, { what: 'the not saved yet note', timeout: 15000 });
-    check(await options3.eval(`document.getElementById('wait-note').hidden`), 'the wait note and the not saved yet note showed together');
-    // The model field fills in once the helper answers (it shows the helper's settings).
-    await options3.waitFor(`document.getElementById('claude-model').value === 'opus'`, { what: 'the carried model', timeout: 15000 }).catch(async (err) => {
-      throw new Error(`${err.message}: ${await options3.eval(`document.getElementById('claude-model').value`)}`);
-    });
+    await options3.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the choice saved by itself', timeout: 30000 });
+    check(await options3.eval(`document.getElementById('wait-note').hidden`), 'the wait note and the saved note showed together');
+    // The carried model is in the list once the helper answers.
+    await options3.waitFor(hasRow('Opus'), { what: 'the carried model', timeout: 15000 });
     const stored = await options3.eval(`chrome.storage.local.get(null)`);
     check(!stored.settingsResume, `resume record left: ${JSON.stringify(stored.settingsResume)}`);
     check(!stored.nativeReload, `reload guard left: ${JSON.stringify(stored.nativeReload)}`);
     const saved = await options3.eval(`chrome.runtime.sendMessage({ type: 'lc-tutor:settings-get' })`);
-    check(saved.ok && !saved.result.settings.provider, `something was saved: ${JSON.stringify(saved.result && saved.result.settings.provider)}`);
-    // The companion runs its built-in default while the page holds it up;
-    // the header must not present that as a saved choice.
+    check(saved.ok && saved.result.settings.provider === 'claude', `the choice was not saved: ${JSON.stringify(saved.result && saved.result.settings.provider)}`);
+    // Saved, so the header calls it running, not "Not saved yet".
     const header = await options3.eval(`({ text: document.getElementById('connection-text').textContent, green: document.getElementById('connection').hasAttribute('data-ok') })`);
-    check(/^Not saved yet: Claude subscription/.test(header.text) && !header.green, `header: ${JSON.stringify(header)}`);
+    check(/^Tutor running: Claude subscription/.test(header.text) && header.green, `header: ${JSON.stringify(header)}`);
     await helperPidsOf(options3);
     await options3.eval(`document.getElementById('helper-card').scrollIntoView({ block: 'center' })`);
     await options3.screenshot(path.join(shots, 'helper-after-setup-reload.png'), { width: 900, height: 1100 });
   });
 
   await scenario('only the options page behind: it reloads itself and keeps the choice', async () => {
-    await options3.eval(`(() => { const s = document.getElementById('claude-model'); s.value = 'haiku'; s.dispatchEvent(new Event('change', { bubbles: true })); window.__before = 1; delete chrome.runtime.connectNative; })()`);
-    await options3.waitFor(`window.__before === undefined && document.readyState === 'complete' && document.getElementById('claude-model') && document.getElementById('claude-model').value === 'haiku'`, { what: 'the page to reload with the choice', timeout: 15000 });
+    await options3.eval(`(() => { window.__before = 1; delete chrome.runtime.connectNative; })()`);
+    await addModel(options3, 'claude', 'haiku');
+    await options3.waitFor(`window.__before === undefined && document.readyState === 'complete' && ${hasRow('Haiku')}`, { what: 'the page to reload with the choice', timeout: 15000 });
     await options3.waitFor(`document.getElementById('helper-state-text').textContent === 'Running'`, { what: 'Running', timeout: 15000 });
   });
 
@@ -516,7 +607,7 @@ try {
     await options3.eval(`window.__still = 1`);
     await options3.waitFor(`document.getElementById('helper-state-text').textContent === 'Restart the browser'`, { what: 'the restart note', timeout: 12000 });
     const body = await options3.eval(`document.getElementById('helper-body').textContent`);
-    check(/Close every browser window/.test(body), body);
+    check(/Restart the browser/.test(body), body);
     await sleep(6000);
     check((await options3.eval(`window.__still`)) === 1, 'the page was reloaded');
     check((await browser3.serviceWorkerEval('self.__reloads')) === 0, 'the worker reloaded again');

@@ -104,9 +104,10 @@ try {
     await options.type('#local-baseUrl', modelUrl);
     // The model is a dropdown of what the server lists; this stub lists
     // nothing, so it is typed through "Other".
-    await options.eval(`(() => { const s = document.getElementById('local-model'); s.value = '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-    await options.type('#local-model', 'stub-model');
-    await options.click('#save');
+    await // Models are chosen in the add row; the model is typed through "Other" (this stub lists nothing).
+    await await options.eval(`(() => { const p = document.getElementById('add-provider'); p.value = 'local'; p.dispatchEvent(new Event('change', { bubbles: true })); const s = document.getElementById('add-model'); s.value = '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await await options.type('#add-model', 'stub-model');
+    await await options.click('#add-profile-button');
     await options.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the save' });
     options.close();
   });
@@ -265,7 +266,9 @@ try {
     model.script.push('You are welcome.');
     await page.eval(`window.__send('thanks')`);
     await page.waitFor(`window.__replies().at(-1) === 'You are welcome.'`, { what: 'the next reply', timeout: 15000 });
-    const history = JSON.stringify(model.requests.at(-1).body.messages);
+    // The conversation, not the system prompt (which quotes "hash map" as an
+    // example of a leaking question).
+    const history = JSON.stringify(model.requests.at(-1).body.messages.filter((m) => m.role !== 'system'));
     check(history.includes('What does your loop do with each number it reads?') && !history.includes('hash map'), 'history holds the shown hint only');
     check(!history.includes('\u2014') && !history.includes('To fix this') && !history.includes('breaks the tutoring rules'), 'history holds the repaired chat reply and no re-ask');
   });

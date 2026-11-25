@@ -45,6 +45,9 @@ export function createHelperLauncher({
   graceMs = GRACE_MS,
   pingMs = PING_MS,
   log = () => {},
+  // { done(): Promise<boolean>, mark(): Promise<void> }: whether this browser
+  // session already had its forced look for a newer helper (see maybeSessionCheck).
+  sessionUpdate = null,
 }) {
   const tabs = new Map(); // tabId -> { ports, slug }
   const listeners = new Set();
@@ -66,6 +69,48 @@ export function createHelperLauncher({
   let retryTimer = null;
   let retryDelay = RETRY_MIN_MS;
   let nextId = 1;
+  let updating = false; // an update asked for is running
+  let restarting = false; // it finished; the helper is starting again as the new copy
+  let sessionCheckPending = false; // the once-per-session check was asked for, its answer not in yet
+  let sessionChecked = false; // this connection already had its turn at it
+  let updateResult = null; // { ok, error, version } of the last one
+
+  // Asks the helper to install the newer version it knows of (the options page's
+  // button, and the once-per-session check below).
+  function updateNow() {
+    if (updating || restarting || !port) return false;
+    updating = true;
+    updateResult = null;
+    emit();
+    if (!post({ type: 'update' })) {
+      updating = false;
+      emit();
+      return false;
+    }
+    return true;
+  }
+
+  // The first time a browser session reaches the helper, ask the registry
+  // now (the daily cache is skipped) and let the answer decide. Once per
+  // browser session, kept by the worker's `sessionUpdate`.
+  async function maybeSessionCheck() {
+    if (!sessionUpdate || sessionChecked || updating || restarting) return;
+    sessionChecked = true;
+    let done = true;
+    try {
+      done = await sessionUpdate.done();
+    } catch {
+      done = true;
+    }
+    if (done) return;
+    try {
+      await sessionUpdate.mark();
+    } catch {
+      // asked again next time at worst
+    }
+    sessionCheckPending = true;
+    if (!post({ type: 'update-check' })) sessionCheckPending = false;
+  }
 
   function emit() {
     const snapshot = view();
@@ -73,7 +118,7 @@ export function createHelperLauncher({
   }
 
   function view() {
-    return { wanted, state, tabs: tabs.size, host, error };
+    return { wanted, state, tabs: tabs.size, host, error, updating: updating || restarting, updateResult };
   }
 
   function post(message) {
@@ -138,6 +183,26 @@ export function createHelperLauncher({
         error = message.error || null;
         state = 'running';
         retryDelay = RETRY_MIN_MS;
+        restarting = false;
+        emit();
+        maybeSessionCheck();
+      } else if (message.type === 'update-check' && message.update && host) {
+        // The answer to an explicit check: what the registry said just now.
+        host = { ...host, update: message.update };
+        emit();
+        // The once-per-session check found a newer helper and the student has
+        // not turned automatic updates off: install it now, before it is used.
+        if (sessionCheckPending) {
+          sessionCheckPending = false;
+          if (message.update.newer && message.update.auto) updateNow();
+        }
+      } else if (message.type === 'update') {
+        // The host leaves after a good update, so the browser starts the new copy.
+        updating = false;
+        // A good update ends the host, so the helper is about to come back as
+        // the new copy; until it does it is still "updating".
+        restarting = Boolean(message.ok);
+        updateResult = { ok: Boolean(message.ok), error: message.error || null, version: message.version || null };
         emit();
       }
     });
@@ -188,6 +253,20 @@ export function createHelperLauncher({
   }
 
   return {
+    // Asks the helper to look for a newer version now.
+    checkUpdate() {
+      return post({ type: 'update-check' });
+    },
+
+    // Asks the helper to install the newer version it knows of. It stops, and
+    // this reconnects to the new copy by itself.
+    updateNow,
+
+    // Whether the helper installs a newer version by itself when it stops.
+    setAutoUpdate(enabled) {
+      return post({ type: 'set-auto-update', enabled: Boolean(enabled) });
+    },
+
     // A Tutor panel port opened in this tab.
     tabOpened(tabId, url) {
       const entry = tabs.get(tabId) || { ports: 0, slug: null };

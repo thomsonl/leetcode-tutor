@@ -7,8 +7,8 @@ The listing text, single purpose and permission justifications are shared with F
 
 ## Version
 
-`manifest.json` is at `1.3.0`, and that is the version for this upload.
-The dashboard shows version 1.0.0 as the live version, so 1.3.0 is higher and needs no bump.
+`manifest.json` is at `1.4.0`, and that is the version for this upload.
+The store only needs each upload to carry a higher version than the one live there, and 1.4.0 is higher than 1.3.0.
 The store only requires each upload to carry a higher version than the last one; bump before any later upload.
 
 ## Must be done before you press Submit
@@ -19,7 +19,7 @@ The store only requires each upload to carry a higher version than the last one;
    Until it is published, the options page's install command (`npx leetcode-capture-helper install`) fails, so the Claude and ChatGPT subscription paths do not work for a store user.
    If you submit before publishing it, paste the "Description without the subscription line" variant below instead.
 3. Run `npm test` and `npm run lint:amo` in `extension/`.
-4. Run `npm run build:chrome` in `extension/` and upload `extension/web-ext-artifacts/leetcode_capture-chrome-1.3.0.zip`.
+4. Run `npm run build:chrome` in `extension/` and upload `extension/web-ext-artifacts/leetcode_capture-chrome-1.4.0.zip`.
    That is the chrome build of `scripts/build.mjs` (no `background.scripts`, which Chrome warns about), zipped with `manifest.json` at the root.
    `npm run build:amo` makes the Firefox package and is not the one to upload here.
 
@@ -41,9 +41,9 @@ This release is a tutor:
 
 | What | Where | Notes |
 |---|---|---|
-| Extension zip | Package tab | `extension/web-ext-artifacts/leetcode_capture-chrome-1.3.0.zip` after `npm run build:chrome` |
+| Extension zip | Package tab | `extension/web-ext-artifacts/leetcode_capture-chrome-1.4.0.zip` after `npm run build:chrome` |
 | Store icon, 128x128 PNG | Store listing tab | `extension/store-assets/store-icon-128.png` (96x96 artwork with 16 px of transparent padding, as the store's image guidelines ask) |
-| Screenshots, 1280x800 | Store listing tab | The four `extension/store-assets/shot-*.png`, in order (captions below) |
+| Screenshots, 1280x800 | Store listing tab | The four `extension/store-assets/shot-*.png`, in order (captions below; made on 2026-11-25 from the real extension on a real problem page) |
 | Small promo tile, 440x280 | Store listing tab | `extension/store-assets/promo-small-440x280.png` |
 
 `extension/icons/icon-128.png` (in the zip) is a valid 128x128 RGBA PNG, full bleed, used by Chrome itself; the padded copy is only for the listing.
@@ -57,10 +57,10 @@ If it offers a caption or description field for a screenshot, paste these; other
 
 1. `shot-1-tutor-hint.png`:
    `Ask for a hint in the Tutor tab and get a question that points the way, not the answer.`
-2. `shot-2-practice-skill.png`:
-   `Practice a skill: three problems near your level, with problems you solved left out.`
+2. `shot-2-interviewer.png`:
+   `Switch to Interviewer mode for a mock interview on the same problem.`
 3. `shot-3-progress.png`:
-   `Track your progress through a problem list of your choice, with the next problem to work on.`
+   `See your progress through a problem list of your choice, with the next problem to work on.`
 4. `shot-4-settings.png`:
    `Choose the model: a local model, your own OpenAI or Anthropic key, or your Claude or ChatGPT subscription.`
 
@@ -79,37 +79,30 @@ A tutor for LeetCode problems: hints and Submit reviews from a local model, your
 **Description:**
 
 ```
-Thomson's LeetCode Tutor adds a Tutor tab to each problem page on leetcode.com. It sees each Run and Submit you make and the code in your editor, and coaches you with hints and questions instead of handing you the answer. It gives a full solution only when you ask for one.
+Thomson's LeetCode Tutor adds a Tutor tab to each problem page on leetcode.com. It sees your Runs, Submits and the code in your editor, and coaches you with hints and questions instead of handing you the answer. It gives a full solution only when you ask for one.
 
 This is an independent project by one developer. It is not affiliated with or endorsed by LeetCode.
 
 Tutor
-- Open a problem and click the Tutor tab, next to Description and Submissions.
-- Ask for a hint, ask why your code fails, or ask about its complexity. Your message carries the code currently in the editor, so you never paste it.
-- When you Submit, the tutor reviews that attempt. Runs are noted but not sent.
-- Each problem keeps its own conversation.
+- Click the Tutor tab next to Description and Submissions.
+- Ask for a hint, ask why your code fails, or ask about its complexity. The tutor already has your code, so you never paste it.
+- When you Submit, the tutor reviews that attempt.
+- Switch to Interviewer mode for a mock interview.
 
-Progress
-- When a submission is accepted, the problem is marked solved and a short card suggests what to try next.
-- The Progress page shows how far you are through a well-known problem list you pick from a menu, and which problem comes next. "Sync from LeetCode" pulls in the problems your account already solved, and you can mark problems solved or starred by hand.
-
-Practice a skill
-- Pick a skill and get three problems near your level, chosen from problem data that ships with the extension. Problems you solved are left out.
+Progress and practice
+- See how far you are through a well-known problem list, with the next problem to try.
+- Pick a skill and get three problems near your level.
 
 Choose your model in Settings
-- A local model through any OpenAI-compatible server, such as Ollama. Your code stays on your computer. Small local models give weaker hints and reviews than large hosted models.
-- Your own OpenAI or Anthropic API key. Requests go straight from your browser to that provider and are billed to your key.
-- Your Claude or ChatGPT subscription, through a free helper program you install on your computer (it needs Node.js). The helper starts the tutor while a problem tab is open and stops it after you close the last one.
+- A local model, such as Ollama. Your code stays on your computer.
+- Your own OpenAI or Anthropic API key.
+- Your Claude or ChatGPT subscription, through a free helper program you install (needs Node.js).
+The newest version of the model you pick is always used.
 
 Privacy
 - Your code, the problem text and your messages go only to the provider you choose.
-- API keys stay in the browser's extension storage and are only sent to their own provider.
-- Solved problems and progress stay in your browser and are never sent anywhere.
-- No analytics, no ads, no tracking, no remote code, and nothing is sent to the developer.
-- The browser asks before the extension may reach your model server or start the helper.
-- The first time the Tutor tab looks for the tutor on your computer, Chrome may ask whether leetcode.com may "access other apps and services on this device". Choose Allow: the page only talks to the tutor at localhost:8135.
-
-Run and Submit are noticed from the buttons and from the keyboard shortcuts Ctrl/Cmd+' (Run) and Ctrl/Cmd+Enter (Submit).
+- Keys and progress stay in your browser. No analytics, no ads, no tracking, and nothing is sent to the developer.
+- The first time the Tutor tab starts, Chrome may ask whether leetcode.com may "access other apps and services on this device". Choose Allow: it only talks to the tutor at localhost:8135.
 
 Source code, setup help and the privacy policy: https://github.com/thomsonl/leetcode-capture
 ```
@@ -130,6 +123,14 @@ The "not affiliated" line sits in the first lines on purpose, right after the na
 **Support URL:** https://github.com/thomsonl/leetcode-capture/issues
 
 **Mature content:** No
+
+## Test instructions (Access, Test instructions; no credentials needed)
+
+**Additional instructions (440 characters, max 500):**
+
+```
+Open any problem on leetcode.com, for example /problems/two-sum/, and click the Tutor tab next to Description. The tutor needs a model: click the gear in the Tutor tab header and add one. The easiest to test is an OpenAI or Anthropic API key (nothing to install). The Claude and ChatGPT subscription options need the optional helper (npx leetcode-capture-helper install, requires Node). The progress popup (bar graph button) needs no setup.
+```
 
 ## Privacy practices tab
 
@@ -171,10 +172,10 @@ Tutor the user on the LeetCode problem they are solving: read the problem and th
   The extension's purpose is tutoring on LeetCode problem pages: it adds the Tutor tab there, reads the problem and the user's editor code when they Run, Submit or message the tutor, and notices when LeetCode accepts their submission. It runs on no other pages.
   ```
 
-- Web accessible resources `inject.js` and `layout-bridge.js` (matches `https://leetcode.com/*`, if asked):
+- Web accessible resources `inject.js`, `layout-bridge.js` and `progress-card.html` (matches `https://leetcode.com/*`, if asked):
 
   ```
-  Both run in the LeetCode page's own context. inject.js reads the full text of the Monaco editor (the rendered editor only holds the lines on screen) and reads only the accepted or not verdict of the user's own submission. layout-bridge.js places the Tutor tab in LeetCode's tab layout. The pattern is broader than the content script's because Chrome rejects the extension when the two are identical.
+  Both run in the LeetCode page's own context. inject.js reads the full text of the Monaco editor (the rendered editor only holds the lines on screen) and reads only the accepted or not verdict of the user's own submission. layout-bridge.js places the Tutor tab in LeetCode's tab layout. progress-card.html is the extension's own progress page, shown in a frame inside the Tutor tab's progress popup; it holds no data of its own and reads the same local progress storage. The pattern is broader than the content script's because Chrome rejects the extension when the two are identical.
   ```
 
 **Are you using remote code?** No, I am not using remote code.

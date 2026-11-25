@@ -74,6 +74,7 @@ export class AnthropicBackend extends LocalBackend {
     baseUrl = ANTHROPIC_BASE_URL,
     contextTokens = ANTHROPIC_CONTEXT_TOKENS,
     maxTokens = ANTHROPIC_MAX_TOKENS,
+    systemMessage = systemMessageFor(),
   }) {
     if (!apiKey) throw new Error('the Anthropic provider needs an API key');
     super({
@@ -88,7 +89,7 @@ export class AnthropicBackend extends LocalBackend {
       // truncates (an over-long request is refused instead).
       probe: async () => null,
       windowSetting: 'the Anthropic provider',
-      systemMessage: systemMessageFor('anthropic'),
+      systemMessage,
     });
     this.maxTokens = maxTokens;
   }

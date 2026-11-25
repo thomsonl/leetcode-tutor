@@ -277,3 +277,30 @@ test('the post-check guard re-ask carries the rejected reply and the rule, and o
   assert.ok(!next.includes('FAKE-REPLY-1'));
   assert.ok(!next.includes('breaks the tutoring rules'));
 });
+
+test('a tier is resolved to the newest model in the Codex catalog, any tier, remembered for an hour', async () => {
+  let listed = 0;
+  const backend = new CodexBackend({
+    model: 'zenith',
+    cwd: '/s',
+    systemPrompt: 'x',
+    listModels: async () => {
+      listed += 1;
+      return ['gpt-6.2-sol', 'gpt-9-zenith', 'gpt-10-zenith', 'gpt-reserve'];
+    },
+  });
+  assert.equal(await backend.resolveModel(), 'gpt-10-zenith');
+  assert.equal(await backend.resolveModel(), 'gpt-10-zenith');
+  assert.equal(listed, 1);
+});
+
+test('an exact model name is sent as saved, and an unreadable or lacking catalog leaves the choice to codex itself', async () => {
+  const exact = new CodexBackend({ model: 'gpt-6.1-sol', cwd: '/s', systemPrompt: 'x', listModels: async () => assert.fail('an exact model never asks') });
+  assert.equal(await exact.resolveModel(), 'gpt-6.1-sol');
+  const none = new CodexBackend({ model: null, cwd: '/s', systemPrompt: 'x', listModels: async () => assert.fail('no model never asks') });
+  assert.equal(await none.resolveModel(), null);
+  const broken = new CodexBackend({ model: 'luna', cwd: '/s', systemPrompt: 'x', listModels: async () => { throw new Error('no codex'); } });
+  assert.equal(await broken.resolveModel(), null, 'no -m: codex uses its own current default');
+  const lacking = new CodexBackend({ model: 'luna', cwd: '/s', systemPrompt: 'x', listModels: async () => ['gpt-6.2-sol'] });
+  assert.equal(await lacking.resolveModel(), null);
+});

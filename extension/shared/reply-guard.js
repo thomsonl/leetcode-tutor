@@ -39,7 +39,7 @@ export const EARLY_STOP_FACTOR = 1.6;
 // Appended to the message of an optimal-runtime question, next to where the
 // model answers, like SUBMIT_ADDENDUM for a Submit: a small model follows a
 // rule beside the question far more reliably than one in the system message.
-export const OPTIMAL_NOTE = '\n\n(Answer first and plainly: are their time and space the best achievable for this problem? If yes, say so. If not, say only that a better bound exists, never the bound, a method, a data structure or "one pass", then ask one question about what their code repeats. No edge-case question.)';
+export const OPTIMAL_NOTE = '\n\n(Answer first and plainly, stating the time and space complexity of their code: are they the best achievable for this problem? If yes, say that this is the most optimal complexity for this problem. If not, say only that a better bound exists, never the bound, a method, a data structure or "one pass", then ask one question about what their code repeats. No edge-case question.)';
 
 // What stands in when a held reply and its one re-ask both break a rule and
 // nothing safe is left of either.
@@ -60,6 +60,10 @@ const ALTERNATIVES_RE = /\b(?:better|faster|other|another|different|alternative|
 // Asking whether the code is already as good as it can be: answered with a
 // yes or "a better bound exists", never the bound or the method.
 const OPTIMAL_ASK_RE = /\b(?:is|are)\s+(?:this|it|my\s+(?:solution|code|approach|runtime|time(?:\s+complexity)?|complexity))\s+(?:the\s+)?(?:optimal|best)\b|\boptimal\s+(?:run\s*time|runtime|time|complexity|space)\b|\b(?:best|fastest)\s+(?:possible|achievable|known)\b|\bcan\s+(?:this|it|i)\s+(?:be\s+)?(?:made\s+|done\s+)?(?:faster|better|more\s+efficient)\b|\bam\s+i\s+(?:at|there)\b|\b(?:fast|good)\s+enough\b|\bany\s+(?:faster|better)\b|\bshould\s+i\s+(?:keep\s+)?(?:looking|optimi[sz]ing)\b/i;
+// Asking what the complexity of their code is: answered like an optimal-runtime
+// question, since every report of their complexity says whether a better bound
+// exists (and the plain "most optimal complexity" sentence is allowed to stay).
+const COMPLEXITY_ASK_RE = /\b(?:what(?:'s|\s+is|\s+are)?|tell\s+me|check|give\s+me|analy[sz]e)\s+(?:the\s+|my\s+)?(?:(?:time|space)(?:\s+(?:and|&)\s+(?:time|space))?\s+|big[\s-]?o\s+)?complexity\b(?!\s+of\s+(?!(?:my|this|that|it)\b|the\s+(?:code|solution|approach|algorithm|implementation)\b))|\b(?:time|space)(?:\s+and\s+(?:time|space))?\s+complexity\s+of\s+(?:my|this|the|that)\s+(?:code|solution|approach|algorithm|implementation)\b|\bbig[\s-]?o\s+of\s+(?:my|this|the)\s+(?:code|solution|approach)\b/i;
 const CODE_REQUEST_RE = /\b(?:show|give|write|send|share|post)\s+(?:me\s+)?(?:the\s+|some\s+|working\s+)?(?:code|implementation|pseudo-?code)\b|\b(?:with|in|as)\s+(?:the\s+)?(?:code|pseudo-?code)\b|\bcode\s+(?:it|this|that)\b|\bimplement\s+(?:it|this|that)\b|\bwrite\s+(?:it|this|that)\s+(?:out|for\s+me)\b|\bpseudo-?code\b/i;
 const FIX_REQUEST_RE = /\b(?:fix|repair|correct\s+(?:it|this|that|my)|how\s+(?:do|can|should|would)\s+i\s+(?:change|correct|make))\b/i;
 
@@ -74,7 +78,7 @@ export function classifyMessage(text, { trigger = null, hintsGiven = 0 } = {}) {
   if (HINT_RE.test(value)) return { kind: 'hint', hintNumber: hintsGiven + 1 };
   const alternatives = ALTERNATIVES_RE.test(value);
   if (alternatives) return { kind: CODE_REQUEST_RE.test(value) ? 'answer' : 'alternatives' };
-  if (OPTIMAL_ASK_RE.test(value) && !CODE_REQUEST_RE.test(value)) return { kind: 'optimal' };
+  if ((OPTIMAL_ASK_RE.test(value) || COMPLEXITY_ASK_RE.test(value)) && !CODE_REQUEST_RE.test(value)) return { kind: 'optimal' };
   if (CODE_REQUEST_RE.test(value) || FIX_REQUEST_RE.test(value)) return { kind: 'answer' };
   if (STUCK_RE.test(value) && !value.includes('?')) return { kind: 'stuck' };
   return { kind: 'chat' };

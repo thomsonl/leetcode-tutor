@@ -21,8 +21,9 @@
 
 import { PROVIDERS, OLLAMA_BASE_URL, OPENAI_BASE_URL, defaultRuntime } from './providers.js';
 import { LocalBackend } from './local-backend.js';
-import { systemMessageFor } from './tutor-prompt.js';
+import { DEFAULT_PROMPTS, FIXED_RULES, MAX_PROMPT_CHARS, MODES, PromptError, normalizeMode, normalizePrompts, systemMessageFor } from './tutor-prompt.js';
 import { AnthropicBackend, ANTHROPIC_BASE_URL, DEFAULT_ANTHROPIC_MODEL } from './anthropic-backend.js';
+import { createOpenAIResolver } from './model-aliases.js';
 import { ProfileError, cleanActiveProfile, cleanProfiles, findProfile, migrateProfiles, profileName } from './profiles.js';
 
 export const EXTENSION_SETTINGS_VERSION = 2;
@@ -65,6 +66,10 @@ export function emptySettings() {
     options: { ...DEFAULT_OPTIONS },
     profiles: [],
     activeProfile: null,
+    // The tutor's mode ('tutor' or 'interviewer') and the student's own
+    // prompt for each (null means the shipped default); see tutor-prompt.js.
+    mode: 'tutor',
+    prompts: { tutor: null, interviewer: null },
   };
 }
 
@@ -155,6 +160,8 @@ export function normalizeSettings(raw) {
   out.profiles = migrated.profiles;
   out.activeProfile = migrated.activeProfile;
   syncActive(out);
+  out.mode = normalizeMode(raw.mode);
+  out.prompts = normalizePrompts(raw.prompts);
   return out;
 }
 
@@ -268,6 +275,21 @@ export function applyPatch(settings, secrets, patch) {
     followLegacyPatch(next);
   }
   syncActive(next);
+  if (patch.mode !== undefined) {
+    if (!MODES.includes(patch.mode)) throw new SettingsError('unknown mode', 'mode');
+    next.mode = patch.mode;
+  }
+  if (patch.prompts !== undefined) {
+    if (!patch.prompts || typeof patch.prompts !== 'object' || Array.isArray(patch.prompts)) throw new SettingsError('prompts must be an object', 'prompts');
+    // Partial: only the modes named change; null puts one back to its default.
+    const merged = { ...next.prompts };
+    for (const mode of MODES) if (patch.prompts[mode] !== undefined) merged[mode] = patch.prompts[mode];
+    try {
+      next.prompts = normalizePrompts(merged, { strict: true });
+    } catch (err) {
+      throw new SettingsError(err instanceof PromptError ? err.message : 'prompts are not valid', 'prompts');
+    }
+  }
   const options = patch.options || {};
   if (options.autoClearContext !== undefined) {
     if (typeof options.autoClearContext !== 'boolean') throw new SettingsError('autoClearContext must be on or off', 'autoClearContext');
@@ -285,9 +307,19 @@ export function applyPatch(settings, secrets, patch) {
 // 'extension' or 'helper'. Nothing chosen yet means the helper, which is how
 // the extension behaved before it could run the tutor itself, so an existing
 // companion setup keeps working untouched.
+// Whether the browser can start the helper right now (the background worker
+// sets it). A local model then runs through the helper: in the browser Ollama
+// refuses the extension until OLLAMA_ORIGINS trusts it, and the student is not
+// asked where the tutor runs, so the choice that needs no setup is made for them.
+let helperAvailable = false;
+export function setHelperAvailable(value) {
+  helperAvailable = Boolean(value);
+}
+
 export function runtimeFor(settings) {
   const id = settings && settings.provider;
   if (!id || !PROVIDERS[id]) return 'helper';
+  if (id === 'local' && helperAvailable && PROVIDERS.local.runtimes.includes('helper')) return 'helper';
   const runtime = settings.runtimes && settings.runtimes[id];
   return PROVIDERS[id].runtimes.includes(runtime) ? runtime : defaultRuntime(id);
 }
@@ -332,26 +364,30 @@ export function statusSummary(settings) {
   if (!id) return null;
   const fields = settings.providers[id] || {};
   const model = fields.model || (id === 'anthropic' ? DEFAULT_ANTHROPIC_MODEL : null);
-  return { provider: id, label: PROVIDERS[id].label, model };
+  return { provider: id, label: PROVIDERS[id].label, model, mode: normalizeMode(settings.mode) };
 }
 
 // What a backend is built from; unchanged means the running one is kept.
 export function backendKey(settings, secrets) {
   const id = settings.provider;
   const fields = settings.providers[id] || {};
-  return JSON.stringify([id, fields.model, fields.baseUrl, fields.contextTokens, secrets[id] || null, settings.options.localMaxHistoryTurns]);
+  return JSON.stringify([id, fields.model, fields.baseUrl, fields.contextTokens, secrets[id] || null, settings.options.localMaxHistoryTurns, settings.mode, settings.prompts]);
 }
 
 // Builds the backend for the chosen provider. Throws SettingsError when it
 // cannot be built from these settings.
+// One for the worker's life, so the model list is asked for at most once an hour.
+const resolveOpenAI = createOpenAIResolver();
+
 export function buildBackend(settings, secrets, { probe } = {}) {
   const id = settings.provider;
   const problem = missingRequirement(settings, secrets);
   if (problem) throw new SettingsError(problem, 'provider');
   const fields = settings.providers[id];
   const maxHistoryTurns = settings.options.localMaxHistoryTurns;
+  const systemMessage = systemMessageFor(settings.mode, settings.prompts);
   if (id === 'anthropic') {
-    return new AnthropicBackend({ apiKey: secrets.anthropic, model: fields.model, maxHistoryTurns });
+    return new AnthropicBackend({ apiKey: secrets.anthropic, model: fields.model, maxHistoryTurns, systemMessage });
   }
   if (id === 'local' || id === 'openai') {
     return new LocalBackend({
@@ -364,7 +400,9 @@ export function buildBackend(settings, secrets, { probe } = {}) {
       apiStyle: id === 'openai' ? 'openai' : null,
       numCtx: id === 'openai' ? OPENAI_CONTEXT_TOKENS : fields.contextTokens || DEFAULT_LOCAL_CONTEXT_TOKENS,
       windowSetting: WINDOW_SETTING,
-      systemMessage: systemMessageFor(id),
+      systemMessage,
+      // "luna" and the like mean the newest of that family at the time of each request.
+      ...(id === 'openai' ? { modelResolver: (model) => resolveOpenAI(model, { baseUrl: fields.baseUrl || DEFAULT_FIELDS[id].baseUrl, apiKey: secrets[id] }) } : {}),
       ...(probe ? { probe } : {}),
     });
   }
@@ -384,6 +422,13 @@ export function publicView(settings, secrets) {
     options: { ...s.options },
     profiles: s.profiles.map((p) => ({ ...p })),
     activeProfile: s.activeProfile,
+    mode: s.mode,
+    // What the student changed (null: the default), and the defaults and
+    // limit the Settings editor needs to show, reset and check a prompt.
+    prompts: { ...s.prompts },
+    promptDefaults: { ...DEFAULT_PROMPTS },
+    promptMaxChars: MAX_PROMPT_CHARS,
+    promptFixed: FIXED_RULES,
     defaults: { local: { ...DEFAULT_FIELDS.local }, openai: { ...DEFAULT_FIELDS.openai }, anthropic: { model: DEFAULT_ANTHROPIC_MODEL } },
   };
 }

@@ -54,6 +54,11 @@ The extension sends nothing to the developer.
 There are no analytics, no telemetry, no tracking, no ads and no third-party services beyond the provider you chose.
 All of the extension's code ships in the package; it loads and runs no remote code.
 
+The optional helper is a separate npm package, not part of the extension.
+The first time it runs in each browser session, and otherwise at most once a day while it runs, it asks the public npm registry (`registry.npmjs.org`) for the newest version of that package; the request carries no data of yours.
+Unless you turn it off in Settings, it installs a newer version of the helper from npm at a moment nothing is using it, as the command `npx leetcode-capture-helper@latest update` would.
+Your saved helper settings are kept.
+
 ## API keys
 
 If you enter an OpenAI or Anthropic API key, it is stored only in your browser's local extension storage, on your computer.
@@ -81,9 +86,13 @@ Your data is not used for advertising, for creditworthiness or lending, or for a
 
 ## Deleting your data
 
-- To remove a saved API key, use the key's Remove button on the Settings page and save.
+- To remove a saved API key, use the key's Remove button on the Settings page (settings save as you change them).
 - To remove all settings, keys, solved problems and preferences the extension stored, uninstall the extension; the browser deletes its extension storage.
-- To remove the helper and what it wrote, run `npx leetcode-capture-helper uninstall`, and delete `~/.config/leetcode-capture/settings.json` and `relay-server/data/captures.jsonl` if they exist.
+- When you remove the extension, the browser opens the project's Uninstall page on GitHub (https://github.com/thomsonl/leetcode-tutor#uninstall) in a new tab.
+  The extension sends nothing with that visit; the address has no identifier or version in it.
+- To remove the helper and what it wrote, run `npx leetcode-capture-helper uninstall`.
+  It removes the helper's files, its browser registration and its saved settings, including `~/.config/leetcode-capture/settings.json`.
+  Delete `relay-server/data/captures.jsonl` too if it exists.
 - Any notes the optional vault feature wrote are ordinary files in your vault; delete them like any other file.
 - Data already sent to a provider you chose is held under that provider's own retention policy; see your account settings with that provider.
 

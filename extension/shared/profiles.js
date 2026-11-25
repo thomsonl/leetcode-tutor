@@ -14,6 +14,8 @@
 //
 // Pure JavaScript with no Node API (extension/shared.test.js checks that).
 
+import { canonicalModel, tierLabel, tierOf } from './model-aliases.js';
+
 export const PROFILE_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const MAX_PROFILES = 30;
 export const MAX_PROFILE_LABEL = 60;
@@ -37,7 +39,8 @@ export function cleanProfile(raw, providers) {
   if (!raw || typeof raw !== 'object') return null;
   if (typeof raw.id !== 'string' || !PROFILE_ID_RE.test(raw.id)) return null;
   if (typeof raw.provider !== 'string' || !Object.prototype.hasOwnProperty.call(providers, raw.provider)) return null;
-  const model = cleanText(raw.model, 200);
+  const typed = cleanText(raw.model, 200);
+  const model = typed ? canonicalModel(raw.provider, typed) : typed;
   const label = cleanText(raw.label, MAX_PROFILE_LABEL);
   if (model === undefined || label === undefined) return null;
   return { id: raw.id, provider: raw.provider, model, label };
@@ -98,9 +101,23 @@ export function migrateProfiles({ profiles, activeProfile, provider, model }) {
   return { profiles: [profile], activeProfile: profile.id };
 }
 
+// The Claude subscription's models are Claude Code aliases that always mean
+// the newest of that kind, named as the options page's dropdown names them.
+export const CLAUDE_ALIAS_NAMES = { sonnet: 'Sonnet', opus: 'Opus', haiku: 'Haiku' };
+
+// The name of a model as people read it: the friendly name of a Claude alias,
+// the tier of an OpenAI model ("luna" -> "Luna", whatever tiers exist), else
+// the model as saved.
+export function modelName(provider, model) {
+  if (provider === 'claude' && Object.prototype.hasOwnProperty.call(CLAUDE_ALIAS_NAMES, model)) return CLAUDE_ALIAS_NAMES[model];
+  if ((provider === 'openai' || provider === 'chatgpt') && tierOf(model)) return tierLabel(tierOf(model));
+  return model;
+}
+
 // What a profile is called in the switcher and the options page: its own
-// label, else its model, else its provider's label.
+// label, else its model (a Claude alias by its friendly name), else its
+// provider's label.
 export function profileName(profile, providers) {
   if (!profile) return '';
-  return profile.label || profile.model || (providers[profile.provider] && providers[profile.provider].label) || profile.provider;
+  return profile.label || (profile.model && modelName(profile.provider, profile.model)) || (providers[profile.provider] && providers[profile.provider].label) || profile.provider;
 }

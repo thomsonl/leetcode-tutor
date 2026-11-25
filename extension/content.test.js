@@ -515,6 +515,22 @@ test('fetchSolvedSlugs tells a signed-out page and a failing one apart', async (
   assert.deepEqual(await fetchSolvedSlugs(async () => ({ ok: true, json: async () => ({ errors: [{ message: 'x' }] }) })), { ok: false, reason: 'failed' });
 });
 
+test('fetchLoginState reads isSignedIn with the page session and never guesses', async () => {
+  const { fetchLoginState } = require(path.join(__dirname, 'content.js'));
+  const reply = (body) => async (url, init) => {
+    assert.equal(url, '/graphql/');
+    assert.equal(init.credentials, 'include');
+    assert.ok(/lcTutorLogin/.test(JSON.parse(init.body).query));
+    return { ok: true, json: async () => body };
+  };
+  assert.deepEqual(await fetchLoginState(reply({ data: { userStatus: { isSignedIn: true } } })), { ok: true, signedIn: true });
+  assert.deepEqual(await fetchLoginState(reply({ data: { userStatus: { isSignedIn: false } } })), { ok: true, signedIn: false });
+  assert.deepEqual(await fetchLoginState(reply({ data: { userStatus: null } })), { ok: false });
+  assert.deepEqual(await fetchLoginState(reply({ errors: [{ message: 'x' }] })), { ok: false });
+  assert.deepEqual(await fetchLoginState(async () => ({ ok: false })), { ok: false });
+  assert.deepEqual(await fetchLoginState(async () => { throw new Error('offline'); }), { ok: false });
+});
+
 test('autoSync fetches and reports only when the worker says a sync is due', async () => {
   const sent = [];
   const fetchSolved = async () => ({ ok: true, slugs: ['two-sum'] });

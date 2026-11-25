@@ -157,7 +157,7 @@ try {
     const options = await openOptions(browser);
     allPages.push(options);
     await options.waitFor(`document.getElementById('connection-text').textContent === 'Not set up'`, { what: '"Not set up"' });
-    check((await options.eval(`document.querySelector('input[name=provider]:checked').value`)) === 'local', 'Local model is not the first choice');
+    check(await options.eval(`!document.querySelector('#providers .provider-hint')`), 'Claude subscription (its sign-in hint) is not the first choice');
     const providers = await options.eval(`document.getElementById('providers').textContent`);
     check(providers.includes(`OLLAMA_ORIGINS=chrome-extension://${browser.extensionId}`), 'the hint does not carry this extension id');
     await options.screenshot(path.join(shots, 'options-first-run-dark.png'), { width: 1280, height: 900 });
@@ -265,11 +265,23 @@ async function testWith(options, setup) {
   await options.waitFor(`['ok', 'error'].includes(document.getElementById('test-result').getAttribute('data-kind'))`, { what: 'the connection test', timeout: 30000 });
   return testResult(options);
 }
+// Picks a provider the way the page now offers it: adds a model for it
+// (it becomes the default and its settings show below the list).
+async function useProvider(options, provider, model = '') {
+  if (await options.eval(`!document.getElementById('add-provider')`)) await options.click('#add-toggle');
+  await options.eval(`(() => { const s = document.getElementById('add-provider'); s.value = ${JSON.stringify(provider)}; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  if (model) {
+    await options.eval(`(() => {
+      const s = document.getElementById('add-model');
+      if (s.tagName === 'SELECT') { s.value = [...s.options].some((o) => o.value === ${JSON.stringify(model)}) ? ${JSON.stringify(model)} : '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); }
+      if (document.getElementById('add-model').tagName === 'INPUT') document.getElementById('add-model').value = ${JSON.stringify(model)};
+    })()`);
+  }
+  await options.click('#add-profile-button');
+}
 async function pickLocal(options, baseUrl) {
-  await options.click('input[name=provider][value=local]');
   await options.type('#local-baseUrl', baseUrl);
-  await options.eval(`(() => { const s = document.getElementById('local-model'); if (s.tagName === 'SELECT') { s.value = '__other__'; s.dispatchEvent(new Event('change', { bubbles: true })); } })()`);
-  await options.type('#local-model', 'llama3.2');
+  await useProvider(options, 'local', 'llama3.2');
 }
 try {
   const options = await openOptions(browser2);
@@ -295,22 +307,18 @@ try {
     }
   });
 
-  await scenario('an invalid OpenAI key: the provider\'s own reason, and nothing saved', async () => {
-    const s = await stub(401, { error: { message: 'Incorrect API key provided: sk-bad. You can find your API key at https://platform.openai.com/account/api-keys.', type: 'invalid_request_error', code: 'invalid_api_key' } });
-    try {
-      const r = await testWith(options, async () => {
-        await options.click('input[name=provider][value=openai]');
-        await options.type('#openai-apiKey', 'sk-bad');
-        await options.type('#openai-baseUrl', s.url);
-        await options.type('#openai-model', 'gpt-5-mini');
-      });
-      check(r.kind === 'error' && /Incorrect API key/.test(r.text) && /401/.test(r.text), JSON.stringify(r));
-      check(!r.text.includes('OLLAMA_ORIGINS'), 'the Ollama fix shows for OpenAI');
-      const stored = await browser2.serviceWorkerEval(`chrome.storage.local.get(null)`);
-      check(!stored.tutorSecrets, `a key was stored by a test: ${JSON.stringify(stored)}`);
-    } finally {
-      s.server.close();
+  await scenario('the API key providers ask for the key and nothing else (no server address, no context window)', async () => {
+    for (const [provider, model] of [['openai', 'gpt-6.2-sol'], ['anthropic', '']]) {
+      await useProvider(options, provider, model);
+      const fields = await options.eval(`[...document.querySelectorAll('#providers input[id], #providers select[id]')].map((e) => e.id)`);
+      check(JSON.stringify(fields) === JSON.stringify([`${provider}-apiKey`]), `${provider} card fields: ${JSON.stringify(fields)}`);
     }
+    // The OpenAI models are a dropdown, as the Claude ones are.
+    await options.eval(`(() => { const p = document.getElementById('add-provider') || (document.getElementById('add-toggle').click(), document.getElementById('add-provider')); p.value = 'openai'; p.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    const names = await options.eval(`[...document.getElementById('add-model').options].map((o) => o.textContent)`);
+    check(JSON.stringify(names) === JSON.stringify(['Sol', 'Astra', 'Terra', 'Luna', 'Other (type a name)...']), `OpenAI models: ${JSON.stringify(names)}`);
+    const providers = await options.eval(`[...document.getElementById('add-provider').options].map((o) => o.textContent)`);
+    check(providers[providers.length - 1] === 'Local model', `Local model is last: ${JSON.stringify(providers)}`);
   });
 
   await scenario('an invalid Anthropic key: the provider\'s own reason', async () => {
@@ -336,7 +344,7 @@ try {
     await pause(300);
     try {
       const r = await testWith(options, async () => {
-        await options.click('input[name=provider][value=anthropic]');
+        await useProvider(options, 'anthropic');
         await options.type('#anthropic-apiKey', 'sk-ant-bad');
       });
       check(seen.length > 0, 'nothing reached api.anthropic.com');
@@ -348,18 +356,22 @@ try {
   });
 
   await scenario('a subscription provider without the helper: the page points to the Helper section, which asks for the permission first', async () => {
-    await options.click('input[name=provider][value=claude]');
+    await useProvider(options, 'claude');
     await options.waitFor(`!document.getElementById('offline').hidden`, { what: 'the offline note' });
+    await options.waitFor(`document.getElementById('helper-permission')`, { what: 'the Allow button' });
     const seen = await options.eval(`({
       offline: document.getElementById('offline').textContent,
       helperHidden: document.getElementById('helper-card').hidden,
       helper: document.getElementById('helper-card').textContent,
       allow: !!document.getElementById('helper-permission'),
-      saveDisabled: document.getElementById('save').disabled,
+      waiting: document.getElementById('form').hasAttribute('data-disabled'),
     })`);
     check(/Set it up in the Helper section below/.test(seen.offline), `offline note: ${seen.offline}`);
-    check(!seen.helperHidden && seen.allow && /needs Node/.test(seen.helper), `helper section: ${seen.helper}`);
-    check(seen.saveDisabled, 'Save is enabled with nothing to save to');
+    check(!seen.helperHidden && seen.allow && /Needs Node/.test(seen.helper), `helper section: ${seen.helper}`);
+    check(seen.waiting, 'the form is not waiting for the helper');
+    // Waiting for the helper never freezes Advanced: it opens and its options can be changed.
+    const adv = await options.eval(`(() => { const card = document.getElementById('advanced-card'); const box = document.getElementById('autoClearContext'); return { open: true, pointer: getComputedStyle(card).pointerEvents, disabled: box.disabled }; })()`);
+    check(adv.open && adv.pointer !== 'none' && !adv.disabled, `Advanced: ${JSON.stringify(adv)}`);
     await options.screenshot(path.join(shots, 'subscription-no-helper-dark.png'), { width: 1280, height: 1300 });
   });
 

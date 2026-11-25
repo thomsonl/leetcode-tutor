@@ -10,9 +10,6 @@
 // background worker, nothing to install) and/or 'helper' (the companion
 // process on the user's machine, which the subscription providers need
 // because they use a local sign-in). The first one listed is the default.
-// `promptTier` picks the tutor's system message (see systemMessageFor in
-// tutor-prompt.js): 'compact' is a short, strict prompt for small local models
-// with tight context windows, 'full' a richer one for capable hosted models.
 export const PROVIDERS = {
   local: {
     label: 'Local model',
@@ -20,15 +17,13 @@ export const PROVIDERS = {
     fields: ['baseUrl', 'model', 'contextTokens', 'apiKey'],
     requires: ['model'],
     runtimes: ['extension', 'helper'],
-    promptTier: 'compact',
   },
   claude: {
     label: 'Claude subscription',
-    hint: 'Uses your Claude Code sign-in (Claude Pro or Max). To sign in, run claude in a terminal and type /login.',
+    hint: 'To sign in, run claude in a terminal and type /login.',
     fields: ['model'],
     requires: [],
     runtimes: ['helper'],
-    promptTier: 'full',
   },
   anthropic: {
     label: 'Anthropic API key',
@@ -36,23 +31,22 @@ export const PROVIDERS = {
     fields: ['apiKey', 'model'],
     requires: ['apiKey'],
     runtimes: ['extension', 'helper'],
-    promptTier: 'full',
   },
   openai: {
     label: 'OpenAI API key',
     hint: 'Pay-as-you-go with a key from platform.openai.com.',
-    fields: ['apiKey', 'model', 'baseUrl'],
+    // The OpenAI server address is not a field: any OpenAI-compatible server
+    // (a proxy, a gateway) is set up as a Local model, which has one.
+    fields: ['apiKey', 'model'],
     requires: ['apiKey', 'model'],
     runtimes: ['extension', 'helper'],
-    promptTier: 'full',
   },
   chatgpt: {
     label: 'ChatGPT subscription',
-    hint: 'Uses your Codex CLI sign-in (ChatGPT Plus, Pro, Business). To sign in, run codex login in a terminal and choose ChatGPT.',
+    hint: 'To sign in, run codex login in a terminal and choose ChatGPT.',
     fields: ['model'],
     requires: [],
     runtimes: ['helper'],
-    promptTier: 'full',
   },
 };
 

@@ -38,6 +38,7 @@ const check = (condition, message) => {
 // What the account has accepted, and whether it is signed in.
 const account = { signedIn: true, slugs: Array.from({ length: 130 }, (_, i) => `synced-problem-${i}`) };
 const graphqlCalls = [];
+const loginCalls = [];
 
 const copy = extensionCopy(extensionDir, {});
 const browser = await launch({ extensionDir: copy.dir });
@@ -59,9 +60,9 @@ try {
   };
   const buttonState = () => options.eval(`(() => { const b = document.getElementById('sync-btn'); return { result: b.dataset.result || '', bg: getComputedStyle(b).backgroundColor, visibleNote: document.getElementById('sync-status').getBoundingClientRect().height > 1 }; })()`);
 
-  await scenario('the tabs read Progress then Settings', async () => {
+  await scenario('the tabs read Progress, Settings, Changelog', async () => {
     const tabs = await options.eval(`[...document.querySelectorAll('.tab')].map((t) => t.textContent).join()`);
-    check(tabs === 'Progress,Settings', tabs);
+    check(tabs === 'Progress,Settings,Changelog', tabs);
   });
 
   await scenario('with no LeetCode tab open the button says to open one', async () => {
@@ -79,14 +80,22 @@ try {
       const url = new URL(p.request.url);
       if (url.pathname === '/graphql/') {
         const { query, variables } = JSON.parse(p.request.postData);
+        // The login-only check the Progress tab uses to colour its button.
+        if (/lcTutorLogin/.test(query)) {
+          loginCalls.push(account.signedIn);
+          await tab.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from(JSON.stringify({ data: { userStatus: { isSignedIn: account.signedIn } } })).toString('base64') });
+          return;
+        }
         // LeetCode rejects an inline enum string (status: "AC"): it must be a typed variable.
         if (/status:\s*"/.test(query) || !/\$filters: QuestionListFilterInput/.test(query) || variables.filters.status !== 'AC') {
           await tab.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 400, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from('{"errors":[{"message":"invalid filters"}]}').toString('base64') });
           return;
         }
         graphqlCalls.push(variables.skip);
-        const questions = account.slugs.slice(variables.skip, variables.skip + variables.limit).map((titleSlug) => ({ titleSlug, status: 'ac' }));
-        const data = { userStatus: { isSignedIn: account.signedIn }, problemsetQuestionList: { total: account.slugs.length, questions } };
+        // Signed out, the real LeetCode answers isSignedIn false with an empty list.
+        const shown = account.signedIn ? account.slugs : [];
+        const questions = shown.slice(variables.skip, variables.skip + variables.limit).map((titleSlug) => ({ titleSlug, status: 'ac' }));
+        const data = { userStatus: { isSignedIn: account.signedIn }, problemsetQuestionList: { total: shown.length, questions } };
         await tab.send('Fetch.fulfillRequest', {
           requestId: p.requestId,
           responseCode: 200,
@@ -133,13 +142,39 @@ try {
     check(/Up to date: 131 problems/.test(await sync()), 'a second press adds nothing');
   });
 
-  await scenario('a signed-out LeetCode tab is reported and nothing is added', async () => {
+  const syncUi = () => options.eval(`(() => { const b = document.getElementById('sync-btn'); const l = document.getElementById('sync-last'); return { label: b.textContent, disabled: b.disabled, login: b.dataset.login || '', bg: getComputedStyle(b).backgroundColor, last: l.textContent, lastSize: parseFloat(getComputedStyle(l).fontSize), btnSize: parseFloat(getComputedStyle(b).fontSize), lastLeft: l.getBoundingClientRect().left, btnRight: b.getBoundingClientRect().right, lastTop: l.getBoundingClientRect().top, btnTop: b.getBoundingClientRect().top, btnH: b.getBoundingClientRect().height }; })()`);
+  const wake = () => options.eval(`window.dispatchEvent(new Event('focus'))`);
+
+  await scenario('Last synced shows beside the button in a smaller font', async () => {
+    const ui = await syncUi();
+    check(/^Last synced (just now|\d+ min ago)$/.test(ui.last), ui.last);
+    check(ui.lastSize < ui.btnSize, `font ${ui.lastSize} vs ${ui.btnSize}`);
+    check(ui.lastLeft >= ui.btnRight && ui.lastLeft - ui.btnRight < 24, `gap ${ui.lastLeft - ui.btnRight}`);
+    check(Math.abs(ui.lastTop + 8 - (ui.btnTop + ui.btnH / 2)) < 4, 'vertically centred on the button');
+  });
+
+  await scenario('a signed-out LeetCode tab turns the button red and stops it syncing', async () => {
     account.signedIn = false;
     account.slugs.push('would-be-added');
-    const text = await sync();
-    check(/Sign in to LeetCode/.test(text), text);
+    await wake();
+    await options.waitFor(`document.getElementById('sync-btn').dataset.login === 'out'`, { what: 'the signed-out button' });
+    const ui = await syncUi();
+    check(ui.label === 'LeetCode not logged in', ui.label);
+    check(ui.disabled === true && isColour(ui.bg, 'red'), `disabled red: ${JSON.stringify(ui)}`);
+    check(/^Last synced/.test(ui.last), 'still says when it last synced');
+    await new Promise((r) => setTimeout(r, 6500));
+    const later = await syncUi();
+    check(later.login === 'out' && later.label === 'LeetCode not logged in' && isColour(later.bg, 'red'), 'stays red, not just for a few seconds');
     check(!(await stored()).solvedProblems['would-be-added'], 'added while signed out');
+  });
+
+  await scenario('signing back in unlocks the button again', async () => {
     account.signedIn = true;
+    await wake();
+    await options.waitFor(`!document.getElementById('sync-btn').dataset.login`, { what: 'the button to unlock' });
+    const ui = await syncUi();
+    check(ui.label === 'Sync from LeetCode' && ui.disabled === false, JSON.stringify(ui));
+    check(/Added 1 problem/.test(await sync()), 'it syncs again');
   });
 
   await scenario('a synced problem shows its own tip on the Progress tab', async () => {

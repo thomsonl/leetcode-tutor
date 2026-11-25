@@ -85,7 +85,7 @@ try {
       tabs: [...document.querySelectorAll('.tab')].map((t) => t.textContent),
     })`);
     check(m.label === 'Problem Sets', m.label);
-    check(m.tabs.join() === 'Progress,Settings', `tab order: ${m.tabs}`);
+    check(m.tabs.join() === 'Progress,Settings,Changelog', `tab order: ${m.tabs}`);
     check(m.options.map((o) => o.id).join() === LISTS.map((l) => l.id).join(), `order: ${m.options.map((o) => o.id)}`);
     for (const [i, o] of m.options.entries()) check(o.name === LISTS[i].title, JSON.stringify(o));
     check(m.options.find((o) => o.id === 'top-100-liked').name === 'Top 100 Liked by LeetCode' && m.options.find((o) => o.id === 'top-interview-150').name === 'Top Interview 150 by LeetCode', 'by LeetCode names');
@@ -171,7 +171,7 @@ try {
       total: document.querySelector('.total').textContent,
       next: document.querySelector('.next-up').textContent,
       nodes: document.querySelectorAll('.node').length,
-      cards: [...document.querySelectorAll('.group')].map((g) => ({ id: g.dataset.topic, step: g.querySelector('.group-step').textContent, title: g.querySelector('.group-title').textContent, count: g.querySelector('.node-count').textContent, next: g.hasAttribute('data-next'), complete: g.hasAttribute('data-complete'), levels: [...g.querySelectorAll('.group-level')].filter((l) => !l.hidden).map((l) => l.querySelector('.group-level-text').textContent), label: g.getAttribute('aria-label') })),
+      cards: [...document.querySelectorAll('.group')].map((g) => ({ id: g.dataset.topic, step: g.querySelector('.group-step').textContent, title: g.querySelector('.group-title').textContent, count: g.querySelector('.node-count').textContent, next: g.hasAttribute('data-next'), complete: g.hasAttribute('data-complete'), minis: g.querySelectorAll('.group-level, .group-levels').length, segs: [...g.querySelectorAll('.node-bar .node-seg')].map((x) => x.title), label: g.getAttribute('aria-label') })),
       foot: document.querySelectorAll('#progress-foot').length,
     })`);
     check(m.sub === 'Your Blind 75 progress' && m.title === 'Blind 75' && m.nodes === 0, JSON.stringify(m));
@@ -182,7 +182,9 @@ try {
     check(m.cards.map((c) => c.step).join() === '1,2,3,4,5,6,7,8,9,10', 'numbered');
     check(m.cards[0].count === '9 / 10' && m.cards[0].next && m.cards.filter((c) => c.next).length === 1, JSON.stringify(m.cards[0]));
     check(m.cards[2].count === '2 / 11', `DP counts Climbing Stairs and Combination Sum IV: ${m.cards[2].count}`);
-    check(JSON.stringify(m.cards[0].levels) === JSON.stringify(['E 3/3', 'M 6/7']), `difficulty parts: ${m.cards[0].levels}`);
+    // One multi-colored bar per card (no second row of mini bars), each segment saying what it is.
+    check(m.cards.every((c) => c.minis === 0), 'no second set of difficulty bars');
+    check(JSON.stringify(m.cards[0].segs) === JSON.stringify(['Easy: 3 of 3 solved', 'Medium: 6 of 7 solved']), `difficulty segments: ${m.cards[0].segs}`);
     check(m.cards[0].label === 'Array, category 1 of 10, 9 of 10 solved, recommended next. Easy 3 of 3, Medium 6 of 7', m.cards[0].label);
     check(m.foot === 0, 'no description at the bottom');
     await page.screenshot(path.join(shots, 'blind-dark.png'), { width: 1280, height: 1100, scheme: 'dark' });
@@ -447,10 +449,10 @@ try {
       const d = await page.eval(`(() => {
         const drawer = document.getElementById('drawer');
         const cells = [...drawer.querySelectorAll('td, th')].filter((c) => c.scrollWidth > c.clientWidth + 1).map((c) => c.textContent);
-        return { width: drawer.getBoundingClientRect().width, sideways: drawer.scrollWidth > drawer.clientWidth, cells };
+        return { view: document.documentElement.clientWidth, width: drawer.getBoundingClientRect().width, sideways: drawer.scrollWidth > drawer.clientWidth, cells };
       })()`);
       check(!d.sideways && d.cells.length === 0, `panel at ${width}: ${JSON.stringify(d)}`);
-      if (width <= 560) check(d.width === width, `full width panel: ${d.width}`);
+      if (width <= 560) check(d.width === d.view, `full width panel: ${d.width}`);
       await page.screenshot(path.join(shots, `groups-drawer-${width}-dark.png`), { width, height: 900, scheme: 'dark' });
       await key(page, 'Escape');
     });

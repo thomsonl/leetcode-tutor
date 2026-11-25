@@ -143,7 +143,12 @@ export function createTutorEngine({ hub, log = () => {} }) {
   }
 
   // ---- problem switching ---------------------------------------------------
+  // The problem the tutor last worked on: the one a fresh-start notice (a new
+  // mode or prompt) is shown under, since a panel only shows what belongs to
+  // its own problem.
+  let lastSlug = null;
   function activateProblem(problemId, slug) {
+    if (slug) lastSlug = slug;
     const result = ledger.activate(problemId, { slug, resetOnSwitch: options.autoClearContext });
     if (!result.reset) return result;
     if (backend) backend.resetContext();
@@ -219,14 +224,16 @@ export function createTutorEngine({ hub, log = () => {} }) {
   // backend that cannot export) does the ledger forget what the tutor saw,
   // so the next message describes the code from scratch. Setting no backend
   // parks the old one, whose conversation the next backend then takes over.
-  function installBackend(next, key) {
+  function installBackend(next, key, { fresh = false } = {}) {
     if (!next) {
       if (backend) parked = backend;
       backend = null;
       backendKey = null;
       return;
     }
-    const moved = transferConversation(backend || parked, next);
+    // A fresh start (a new mode or prompt) moves nothing over: a chat held
+    // under other instructions would carry the old persona with it.
+    const moved = !fresh && transferConversation(backend || parked, next);
     parked = null;
     backend = next;
     backendKey = key;
@@ -239,18 +246,31 @@ export function createTutorEngine({ hub, log = () => {} }) {
     // the running backend; a new backend takes over the conversation (see
     // installBackend). `error` (no backend) is what every turn says until a
     // working configuration arrives.
-    configure({ backend: nextBackend = null, key = null, label: nextLabel, options: nextOptions, config = null, error = null, explainError = null, keep = false }) {
+    //
+    // `fresh` (a new mode or prompt) starts the conversation over instead:
+    // nothing moves to the new backend, the buffered chat is dropped, and
+    // every panel is told with a notice (`notice` is its text), the same
+    // signal a new problem sends.
+    configure({ backend: nextBackend = null, key = null, label: nextLabel, options: nextOptions, config = null, error = null, explainError = null, keep = false, fresh = false, notice = null }) {
       return queueTurn(async () => {
         explain = explainError || ((message) => message);
         if (nextOptions) options = { ...options, ...nextOptions };
         if (nextLabel) label = nextLabel;
         configError = error || configError;
+        let restarted = false;
         if (keep && backend) {
           // Same backend configuration (only an option changed): keep it.
         } else if (!nextBackend) {
           installBackend(null, null);
         } else if (key === null || key !== backendKey) {
-          installBackend(nextBackend, key);
+          installBackend(nextBackend, key, { fresh });
+          restarted = fresh;
+        }
+        if (restarted) {
+          guard.reset();
+          hub.clear();
+          // Nothing to say (and nothing on screen to clear) before any problem.
+          if (lastSlug) publish({ type: 'notice', problemSlug: lastSlug, text: notice || 'Started a fresh conversation.', switch: true });
         }
         hub.setConfig(config);
       });

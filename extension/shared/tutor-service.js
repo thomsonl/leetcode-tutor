@@ -11,6 +11,8 @@
 //       { type: 'message', id, text, problemSlug, snapshot }
 //       { type: 'switch-profile', reqId, id } the model switcher picked a profile
 //       { type: 'profile-switched', id }      the helper's companion switched to it
+//       { type: 'switch-mode', reqId, mode }  the Tutor | Interviewer switch (fresh chat)
+//       { type: 'mode-switched', mode }       the helper's companion switched mode
 //       { type: 'ping' }                      keeps the worker awake
 //     Worker to panel:
 //       { type: 'runtime', runtime, chosen }  on connect and on every change
@@ -28,7 +30,7 @@
 import { PROVIDERS } from './providers.js';
 import { createEventHub } from './event-hub.js';
 import { createTutorEngine } from './tutor-engine.js';
-import { CONNECTION_TEST_PROMPT } from './tutor-prompt.js';
+import { CONNECTION_TEST_PROMPT, MODES, MODE_LABELS } from './tutor-prompt.js';
 import { listAnthropicModels } from './anthropic-backend.js';
 import { findProfile } from './profiles.js';
 import {
@@ -96,6 +98,10 @@ export function createTutorService({
   let settings = normalizeSettings(null);
   let secrets = normalizeSecrets(null);
   let configuredKey = null;
+  // The mode and prompts the running backend was built with, so a change of
+  // either starts the conversation over (see applyToEngine).
+  let configuredPrompts = null;
+  let configuredMode = null;
 
   const ready = (async () => {
     try {
@@ -122,7 +128,7 @@ export function createTutorService({
   function permissionMessage(current) {
     return (
       `The extension isn't allowed to reach ${serverUrlFor(current)} yet. ` +
-      'Open the extension options and press Save (or Test connection) to allow it.'
+      'Open the extension options and choose the model again (or press Test connection) to allow it.'
     );
   }
 
@@ -164,8 +170,19 @@ export function createTutorService({
       await engine.configure({ backend: null, label, options, config, error: scrub(err.message, [secrets[settings.provider]]) });
       return;
     }
+    // A new mode or prompt starts the conversation over; a new model (the
+    // same instructions) carries it across.
+    const prompts = JSON.stringify(settings.prompts);
+    const fresh = configuredKey !== null && configuredPrompts !== null && (settings.mode !== configuredMode || prompts !== configuredPrompts);
+    const notice = !fresh
+      ? null
+      : settings.mode !== configuredMode
+        ? `Switched to ${MODE_LABELS[settings.mode]} mode. Started a fresh conversation.`
+        : 'Prompt changed. Started a fresh conversation.';
     configuredKey = key;
-    await engine.configure({ backend, key, label, options, config, explainError: explain });
+    configuredMode = settings.mode;
+    configuredPrompts = prompts;
+    await engine.configure({ backend, key, label, options, config, explainError: explain, fresh, notice });
   }
 
   function makeExplainer(current, keys) {
@@ -178,7 +195,7 @@ export function createTutorService({
   // `chosen`: whether a provider is chosen at all, so a panel with no helper
   // running can say to pick one rather than to start the helper.
   function runtimeMessage() {
-    return { type: 'runtime', runtime: runtimeFor(settings), chosen: Boolean(settings.provider) };
+    return { type: 'runtime', runtime: runtimeFor(settings), chosen: Boolean(settings.provider), mode: settings.mode };
   }
 
   function broadcast(message) {
@@ -284,6 +301,69 @@ export function createTutorService({
     onRuntime(runtimeFor(settings), Boolean(settings.provider));
     await broadcastProfiles();
     return { ok: true, runtime: result.runtime };
+  }
+
+  // Tells the helper's companion the saved models that run through it. The
+  // menu lists the extension's saved models, but the companion keeps its own
+  // copy (sent when settings are saved, and only while it runs), so a model
+  // saved a moment ago, or while the helper was down, may be missing there and
+  // a switch to it is refused. The panel asks for this and tries again.
+  async function syncHelperProfiles() {
+    const profiles = settings.profiles.filter((profile) => profileEntry(settings, profile).runtime === 'helper');
+    let res;
+    try {
+      res = await fetch('http://localhost:8135/settings/rpc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ method: 'setProfiles', params: { profiles } }),
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch {
+      return { ok: false, code: 'offline', message: "The helper app isn't running." };
+    }
+    return res.ok ? { ok: true } : { ok: false, code: 'failed', message: "The helper app didn't take the model list." };
+  }
+
+  // The mode switch (Tutor or Interviewer), a setting of its own like the
+  // active profile: only the mode changes. When the tutor runs here, the new
+  // backend goes in through the engine's turn queue and the conversation
+  // starts over (applyToEngine). Resolves once that has happened. Shares the
+  // profile switch's chain, so the two never interleave.
+  function switchMode(mode) {
+    const run = switchChain.then(() => doSwitchMode(mode));
+    switchChain = run.catch(() => {});
+    return run;
+  }
+
+  async function doSwitchMode(mode) {
+    const result = await commit(async () => {
+      if (!MODES.includes(mode)) return { ok: false, code: 'unknown', message: 'That mode does not exist.' };
+      if (settings.mode === mode) return { ok: true, unchanged: true };
+      const next = applyPatch(settings, secrets, { mode });
+      await storage.set({ [SETTINGS_KEY]: next.settings });
+      settings = next.settings;
+      return { ok: true };
+    });
+    if (!result.ok) return result;
+    if (result.unchanged) return { ok: true, runtime: runtimeFor(settings), unchanged: true };
+    await applyToEngine();
+    broadcastRuntime();
+    return { ok: true, runtime: runtimeFor(settings) };
+  }
+
+  // The helper's companion switched mode (the panel asked it through the
+  // relay); the extension remembers it, so the setting is the same in both.
+  async function noteHelperMode(mode) {
+    await commit(async () => {
+      if (!MODES.includes(mode) || settings.mode === mode) return;
+      const next = applyPatch(settings, secrets, { mode });
+      await storage.set({ [SETTINGS_KEY]: next.settings });
+      settings = next.settings;
+    });
+    // Every other panel learns it too, so none of them later asks the helper
+    // to go back to the mode it knew.
+    broadcastRuntime();
   }
 
   // The helper's companion switched to a profile (the panel asked it through
@@ -486,8 +566,22 @@ export function createTutorService({
               (result) => post({ type: 'switch-result', reqId, ...result }),
               (err) => post({ type: 'switch-result', reqId, ok: false, code: 'failed', message: scrub(err.message, Object.values(secrets)) })
             );
+          } else if (message.type === 'sync-helper-profiles') {
+            const reqId = message.reqId;
+            syncHelperProfiles().then(
+              (result) => post({ type: 'switch-result', reqId, ...result }),
+              (err) => post({ type: 'switch-result', reqId, ok: false, code: 'failed', message: scrub(err.message, Object.values(secrets)) })
+            );
           } else if (message.type === 'profile-switched' && typeof message.id === 'string') {
             noteHelperSwitch(message.id).catch((err) => log(`could not note a model switch: ${err.message}`));
+          } else if (message.type === 'switch-mode') {
+            const reqId = message.reqId;
+            switchMode(typeof message.mode === 'string' ? message.mode : '').then(
+              (result) => post({ type: 'switch-result', reqId, ...result }),
+              (err) => post({ type: 'switch-result', reqId, ok: false, code: 'failed', message: scrub(err.message, Object.values(secrets)) })
+            );
+          } else if (message.type === 'mode-switched' && typeof message.mode === 'string') {
+            noteHelperMode(message.mode).catch((err) => log(`could not note a mode switch: ${err.message}`));
           }
           // 'ping' needs no answer: receiving it is what keeps the worker up.
         });
@@ -495,6 +589,17 @@ export function createTutorService({
       port.onDisconnect.addListener(() => {
         ports.delete(port);
         if (unsubscribe) unsubscribe();
+      });
+    },
+
+    // The runtime the settings resolve to changed without a save (a helper
+    // became available, or went away): applies it the way a save does.
+    runtimeChanged() {
+      return ready.then(async () => {
+        await applyToEngine();
+        broadcastRuntime();
+        onRuntime(runtimeFor(settings), Boolean(settings.provider));
+        await broadcastProfiles();
       });
     },
 
@@ -516,6 +621,11 @@ export function createTutorService({
     // For tests: the same as a panel's 'switch-profile'.
     switchProfile(id) {
       return ready.then(() => switchProfile(id));
+    },
+
+    // For tests: the same as a panel's 'switch-mode'.
+    switchMode(mode) {
+      return ready.then(() => switchMode(mode));
     },
   };
 }
