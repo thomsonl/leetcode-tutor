@@ -42,10 +42,10 @@
           </div>
         </section>
 
-        <details class="card" id="advanced-card">
-          <summary><h2 id="behavior-heading">Advanced</h2></summary>
+        <section class="card" id="advanced-card" aria-labelledby="behavior-heading">
+          <h2 id="behavior-heading">Advanced</h2>
           <div id="behavior"></div>
-        </details>
+        </section>
 
         <div class="savebar">
           <p id="wait-note" class="result wait-note" hidden>Waiting for the helper app.</p>
@@ -58,7 +58,7 @@
         <div id="prompts-body"></div>
       </section>
 
-      <section class="card" id="helper-card" aria-labelledby="helper-heading" hidden>
+      <section class="card" id="helper-card" aria-labelledby="helper-heading">
         <div class="helper-head">
           <h2 id="helper-heading">Helper</h2>
           <p id="helper-state" class="connection" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="helper-state-text">Checking</span></p>

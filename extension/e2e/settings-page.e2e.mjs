@@ -483,7 +483,7 @@ function stubServer({ status = 200 } = {}) {
   const model = await stubServer();
   await scenario('browser runtime: with no helper, a local model is set up, tested and saved without the relay', null, async (page) => {
     assert.equal(await page.eval(`Boolean(document.getElementById('local-baseUrl'))`), true, 'the Local model fields are shown');
-    assert.equal(await page.eval(`document.getElementById('helper-card').hidden`), true);
+    assert.equal(await page.eval(`document.getElementById('helper-card').hidden`), false, 'the Helper card is always there');
     assert.equal(await text(page, '#connection-text'), 'Not set up');
     assert.equal(await page.eval(`document.getElementById('offline').hidden`), true, 'no helper warning');
     assert.match(await text(page, '#providers'), /OLLAMA_ORIGINS=chrome-extension:\/\//);
@@ -516,7 +516,7 @@ function stubServer({ status = 200 } = {}) {
 await scenario('browser runtime: an Anthropic key is saved in extension storage only, and never shown back', null, async (page) => {
   const secret = 'sk-ant-BROWSER-SECRET-0987654321';
   await useProvider(page, 'anthropic');
-  assert.equal(await page.eval(`document.getElementById('helper-card').hidden`), true);
+  assert.equal(await page.eval(`document.getElementById('helper-card').hidden`), false, 'the Helper card is always there');
   await page.type('#anthropic-apiKey', secret);
   await leave(page, '#anthropic-apiKey');
   await page.waitFor(SAVED, { what: 'the save' });

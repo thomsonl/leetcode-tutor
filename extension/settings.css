@@ -159,13 +159,6 @@ input:disabled { opacity: 0.6; cursor: not-allowed; background: var(--fill); }
 .subsection .help { margin-bottom: 12px; }
 
 /* Advanced: a card that stays one line until it is opened. */
-details.card > summary { list-style: none; display: flex; align-items: center; gap: 8px; cursor: pointer; }
-details.card > summary::-webkit-details-marker { display: none; }
-details.card > summary::before { content: ""; flex: none; width: 6px; height: 6px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.12s; margin: 0 4px 0 2px; }
-details.card[open] > summary::before { transform: rotate(45deg); }
-details.card > summary h2 { margin: 0; }
-details.card[open] > summary { margin-bottom: 12px; }
-details.card > summary:focus-visible { outline-offset: 6px; border-radius: 6px; }
 
 /* The Prompts card: two toggle tabs choose which prompt the editor shows,
    the chosen one filled, like the Tutor panel's own mode switch. */
@@ -254,7 +247,7 @@ form[data-disabled] .card:not(#helper-card):not(#model-card):not(#advanced-card)
 /* Settings: the model and its options on the left, what the tutor is told and
    the helper on the right. One column on a narrow page. */
 @media (min-width: 900px) {
-  #panel-settings:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 24px; align-items: start; }
+  #panel-settings:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr auto auto; column-gap: 24px; align-items: start; }
   #panel-settings > #offline { grid-column: 1 / -1; grid-row: 1; }
   #panel-settings > form { grid-column: 1; grid-row: 2 / span 2; min-width: 0; }
   #panel-settings > #prompts-card { grid-column: 2; grid-row: 2; }

@@ -212,9 +212,12 @@
   // asks the worker to start the helper (`want`): the provider can only be
   // saved once the helper runs. The wish lapses about 20 s after the section
   // hides or this page closes.
+  // The card is always shown, so the plain status poll only asks for the
+  // helper while a helper model is selected; Check again asks for it too.
   async function workerHelper(type) {
     try {
-      return await api.runtime.sendMessage({ type, want: true });
+      const want = type === "lc-tutor:helper-retry" || Boolean(selected && catalog[selected] && runtimeOf(selected) === "helper");
+      return await api.runtime.sendMessage({ type, want });
     } catch {
       return null;
     }
@@ -617,16 +620,12 @@
     }
   }
 
+  // The Helper card is always there: it is where the helper is set up,
+  // checked and updated, whichever model is selected.
   function renderHelper() {
-    const show = Boolean(selected && catalog[selected] && runtimeOf(selected) === "helper");
     const card = $("helper-card");
     const wasHidden = card.hidden;
-    card.hidden = !show;
-    if (!show) {
-      if (helperTimer) clearInterval(helperTimer);
-      helperTimer = null;
-      return;
-    }
+    card.hidden = false;
     drawHelper();
     if (wasHidden) refreshHelper();
     if (!helperTimer) helperTimer = setInterval(() => refreshHelper(), 5000);

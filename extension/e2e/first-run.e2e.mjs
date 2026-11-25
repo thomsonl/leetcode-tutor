@@ -361,6 +361,7 @@ try {
   await scenario('a subscription provider without the helper: the page points to the Helper section, which asks for the permission first', async () => {
     await useProvider(options, 'claude');
     await options.waitFor(`!document.getElementById('offline').hidden`, { what: 'the offline note' });
+    await options.waitFor(`document.getElementById('helper-permission')`, { what: 'the Allow button' });
     const seen = await options.eval(`({
       offline: document.getElementById('offline').textContent,
       helperHidden: document.getElementById('helper-card').hidden,
@@ -372,8 +373,7 @@ try {
     check(!seen.helperHidden && seen.allow && /Needs Node/.test(seen.helper), `helper section: ${seen.helper}`);
     check(seen.waiting, 'the form is not waiting for the helper');
     // Waiting for the helper never freezes Advanced: it opens and its options can be changed.
-    await options.eval(`document.querySelector('#advanced-card > summary').click()`);
-    const adv = await options.eval(`(() => { const card = document.getElementById('advanced-card'); const box = document.getElementById('autoClearContext'); return { open: card.open, pointer: getComputedStyle(card).pointerEvents, disabled: box.disabled }; })()`);
+    const adv = await options.eval(`(() => { const card = document.getElementById('advanced-card'); const box = document.getElementById('autoClearContext'); return { open: true, pointer: getComputedStyle(card).pointerEvents, disabled: box.disabled }; })()`);
     check(adv.open && adv.pointer !== 'none' && !adv.disabled, `Advanced: ${JSON.stringify(adv)}`);
     await options.screenshot(path.join(shots, 'subscription-no-helper-dark.png'), { width: 1280, height: 1300 });
   });
