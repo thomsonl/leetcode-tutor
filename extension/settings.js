@@ -1243,9 +1243,12 @@
     if ($(`profile-${id}-drag`)) $(`profile-${id}-drag`).focus();
   }
 
-  // Dragging a row by its grip: the row follows the pointer in the list while
-  // it is held, and the new order is kept (and saved) when it is dropped.
-  // The grip also takes the arrow keys, so the order is never mouse-only.
+  // Dragging a row by its grip: the row follows the pointer while it is held,
+  // the others make room, and the new order is kept (and saved) when it is
+  // let go. Done with pointer events, not the browser's own drag and drop,
+  // which depends on the system's drag session and does not work with every
+  // kind of pointer. The grip also takes the arrow keys, so the order is never
+  // mouse-only.
   function dragHandle(profile, name) {
     const handle = iconButton(
       `profile-${profile.id}-drag`,
@@ -1259,48 +1262,44 @@
       e.preventDefault();
       moveProfile(profile.id, e.key === "ArrowUp" ? -1 : 1);
     });
-    // Only the grip starts a drag, so a rename box or a button keeps working.
-    handle.addEventListener("pointerdown", () => {
-      const row = handle.closest(".profile");
-      if (row) row.draggable = true;
-    });
+    handle.addEventListener("pointerdown", (e) => startRowDrag(e, handle));
     return handle;
   }
 
-  function initProfileDrag() {
+  function startRowDrag(e, handle) {
+    if (e.button !== 0) return;
     const list = $("profiles");
-    let dragged = null;
-    list.addEventListener("dragstart", (e) => {
-      const row = e.target.closest ? e.target.closest(".profile") : null;
-      if (!row || !row.draggable) return;
-      dragged = row;
-      row.classList.add("dragging");
-      if (e.dataTransfer) {
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", row.dataset.id);
-      }
-    });
-    list.addEventListener("dragover", (e) => {
-      if (!dragged) return;
-      e.preventDefault();
-      const rows = [...list.querySelectorAll(".profile:not(.dragging)")];
-      // The row under the pointer's middle line is where the dragged one goes before.
-      const after = rows.find((row) => {
-        const box = row.getBoundingClientRect();
-        return e.clientY < box.top + box.height / 2;
+    const row = handle.closest(".profile");
+    if (!row) return;
+    e.preventDefault();
+    const startY = e.clientY;
+    const startTop = row.offsetTop;
+    let moved = false;
+    const onMove = (ev) => {
+      if (!moved && Math.abs(ev.clientY - startY) < 3) return;
+      if (!moved) row.classList.add("dragging");
+      moved = true;
+      // Where the row now belongs: before the first other row whose middle is
+      // below the pointer.
+      const after = [...list.querySelectorAll(".profile")].filter((r) => r !== row).find((r) => {
+        const box = r.getBoundingClientRect();
+        return ev.clientY < box.top + box.height / 2;
       });
-      if (after) list.insertBefore(dragged, after);
-      else list.appendChild(dragged);
-    });
-    list.addEventListener("drop", (e) => {
-      if (dragged) e.preventDefault();
-    });
-    list.addEventListener("dragend", () => {
-      if (!dragged) return;
-      const row = dragged;
-      dragged = null;
+      if (after) {
+        if (row.nextElementSibling !== after) list.insertBefore(row, after);
+      } else if (list.lastElementChild !== row) {
+        list.appendChild(row);
+      }
+      // It is drawn under the pointer, whatever place it now has in the list.
+      row.style.transform = `translateY(${ev.clientY - startY - (row.offsetTop - startTop)}px)`;
+    };
+    const finish = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
       row.classList.remove("dragging");
-      row.draggable = false;
+      row.style.transform = "";
+      if (!moved) return;
       const order = [...list.querySelectorAll(".profile")].map((r) => r.dataset.id);
       const same = order.length === draftProfiles.length && order.every((id, i) => id === draftProfiles[i].id);
       if (same) return;
@@ -1308,7 +1307,12 @@
       saveSoon();
       renderProfiles();
       if ($(`profile-${row.dataset.id}-drag`)) $(`profile-${row.dataset.id}-drag`).focus();
-    });
+    };
+    // On the window, not the grip: moving the row in the list would end a
+    // capture held by the grip.
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
   }
 
   // Focus goes to the row that took the removed one's place (or the one
@@ -2187,6 +2191,5 @@
   });
   window.addEventListener("pagehide", flushSave);
   $("test").addEventListener("click", runTest);
-  initProfileDrag();
   load();
 })();

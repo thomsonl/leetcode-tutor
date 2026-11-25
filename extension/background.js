@@ -21,7 +21,7 @@
 // API. No message to a content script carries one (tutor-service.js).
 
 import { createTutorService, SETTINGS_KEY } from "./shared/tutor-service.js";
-import { normalizeSettings } from "./shared/extension-settings.js";
+import { normalizeSettings, setHelperAvailable } from "./shared/extension-settings.js";
 import { createHelperLauncher, HELPER_HOST_NAME } from "./shared/helper-launcher.js";
 import { MIN_HELPER_VERSION, helperTooOld } from "./shared/helper-version.js";
 import { createExtensionUpdater } from "./shared/extension-update.js";
@@ -99,6 +99,26 @@ function optionsWant() {
   clearTimeout(optionsWantTimer);
   optionsWantTimer = setTimeout(() => refreshHelper(), OPTIONS_WANT_MS + 100);
 }
+// Whether the browser can start the helper, which decides where a local
+// model runs (shared/extension-settings.js runtimeFor). Asked of the host
+// itself at most once a minute, since asking starts it for a moment.
+let helperAvailable = false;
+let helperProbedAt = 0;
+async function updateHelperAvailability(granted) {
+  let next = false;
+  if (granted && typeof api.runtime.connectNative === "function") {
+    if (launcher.view().state === "running") next = true;
+    else if (Date.now() - helperProbedAt > 60000) {
+      helperProbedAt = Date.now();
+      next = await hostAnswers();
+    } else next = helperAvailable;
+  }
+  if (next === helperAvailable) return;
+  helperAvailable = next;
+  setHelperAvailable(next);
+  await service.runtimeChanged();
+}
+
 async function refreshHelper() {
   let granted = false;
   try {
@@ -106,6 +126,7 @@ async function refreshHelper() {
   } catch {
     granted = false;
   }
+  await updateHelperAvailability(granted);
   const wanted = (runtime === "helper" && chosen) || Date.now() < optionsWantUntil;
   const hasApi = typeof api.runtime.connectNative === "function";
   await nativeSetup.check(granted);

@@ -592,6 +592,17 @@ export function createTutorService({
       });
     },
 
+    // The runtime the settings resolve to changed without a save (a helper
+    // became available, or went away): applies it the way a save does.
+    runtimeChanged() {
+      return ready.then(async () => {
+        await applyToEngine();
+        broadcastRuntime();
+        onRuntime(runtimeFor(settings), Boolean(settings.provider));
+        await broadcastProfiles();
+      });
+    },
+
     // Re-checks what the current settings need (call when host permissions
     // change).
     refresh() {

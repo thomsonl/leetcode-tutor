@@ -3626,7 +3626,8 @@
     const reason = entryReason(entry);
     if (reason) return reason;
     const parts = [entry.providerLabel];
-    if (entry.model && entry.model !== entry.name) parts.push(entry.model);
+    // The model is left out when it only says the name again ("Luna" and "luna").
+    if (entry.model && entry.model.toLowerCase() !== String(entry.name).toLowerCase()) parts.push(entry.model);
     return parts.join(" \u00b7 ");
   }
 
@@ -3988,6 +3989,21 @@
     scheduleRender();
   }
 
+  // The extension's chosen model runs through the helper (a local model does
+  // whenever the helper is installed), but the companion may still be on
+  // another one: it is asked, once for each pair, to take the chosen one.
+  let reconciledProfile = null;
+  function reconcileProfile(companionProfile) {
+    const wanted = activeProfileId;
+    const entry = activeEntry();
+    if (!wanted || !entry || entry.runtime !== "helper" || switching || unsettledSwitch) return;
+    if (companionProfile === wanted) return;
+    const pair = `${wanted}|${companionProfile}`;
+    if (reconciledProfile === pair) return;
+    reconciledProfile = pair;
+    setTimeout(() => chooseProfile(wanted, { followUp: true }), 0);
+  }
+
   // ---- transports ----------------------------------------------------------
   //
   // A transport follows the tutor's events (start/stop) and sends a typed
@@ -4012,6 +4028,7 @@
       setTimeout(() => chooseProfile(id, { followUp: true }), 0);
     }
     if (event.type === "config" && transport === relayTransport && typeof event.profile === "string") noteCompanionProfile(event.profile);
+    if (event.type === "config" && transport === relayTransport && typeof event.profile === "string") reconcileProfile(event.profile);
     if (event.type === "config") {
       const reported = event.mode === "interviewer" ? "interviewer" : "tutor";
       if (confirmedMode && reported === confirmedMode) confirmedMode = null;

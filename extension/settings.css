@@ -233,7 +233,7 @@ form[data-disabled] .card:not(#helper-card):not(#model-card):not(#advanced-card)
 .profile-actions { flex: none; display: flex; align-items: center; gap: 2px; }
 .drag-handle { cursor: grab; margin-left: -6px; touch-action: none; }
 .drag-handle:active { cursor: grabbing; }
-.profile.dragging { opacity: 0.5; border-style: dashed; }
+.profile.dragging { position: relative; z-index: 2; opacity: 0.9; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); border-style: dashed; pointer-events: none; }
 .iconbtn { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
 .iconbtn:hover:not(:disabled) { background: var(--fill); color: var(--text); }
 .iconbtn:disabled { opacity: 0.35; cursor: not-allowed; }

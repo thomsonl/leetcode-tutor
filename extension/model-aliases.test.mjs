@@ -115,3 +115,19 @@ test('when the list cannot be read the last answer is kept; with none, the tier\
   t += 61 * 60 * 1000;
   assert.equal(await resolve('astra', opts), FALLBACK_NEWEST.astra, 'a tier the list lacks gets its fallback');
 });
+
+import { runtimeFor, setHelperAvailable } from './shared/extension-settings.js';
+
+test('a local model runs through the helper whenever one is available, and in the browser otherwise; others are unaffected', () => {
+  const local = { provider: 'local', runtimes: { local: 'extension' } };
+  const anthropic = { provider: 'anthropic', runtimes: { anthropic: 'extension' } };
+  const claude = { provider: 'claude', runtimes: {} };
+  setHelperAvailable(false);
+  assert.equal(runtimeFor(local), 'extension');
+  setHelperAvailable(true);
+  assert.equal(runtimeFor(local), 'helper', 'Ollama refuses the extension, so the helper takes it');
+  assert.equal(runtimeFor(anthropic), 'extension', 'an API key model stays in the browser');
+  assert.equal(runtimeFor(claude), 'helper');
+  setHelperAvailable(false);
+  assert.equal(runtimeFor(local), 'extension');
+});

@@ -307,9 +307,19 @@ export function applyPatch(settings, secrets, patch) {
 // 'extension' or 'helper'. Nothing chosen yet means the helper, which is how
 // the extension behaved before it could run the tutor itself, so an existing
 // companion setup keeps working untouched.
+// Whether the browser can start the helper right now (the background worker
+// sets it). A local model then runs through the helper: in the browser Ollama
+// refuses the extension until OLLAMA_ORIGINS trusts it, and the student is not
+// asked where the tutor runs, so the choice that needs no setup is made for them.
+let helperAvailable = false;
+export function setHelperAvailable(value) {
+  helperAvailable = Boolean(value);
+}
+
 export function runtimeFor(settings) {
   const id = settings && settings.provider;
   if (!id || !PROVIDERS[id]) return 'helper';
+  if (id === 'local' && helperAvailable && PROVIDERS.local.runtimes.includes('helper')) return 'helper';
   const runtime = settings.runtimes && settings.runtimes[id];
   return PROVIDERS[id].runtimes.includes(runtime) ? runtime : defaultRuntime(id);
 }

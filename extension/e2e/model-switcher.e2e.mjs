@@ -409,6 +409,19 @@ try {
     await key('Escape');
   });
 
+  await scenario('a helper on another model than the chosen one is asked once to take the chosen one', async () => {
+    await page.eval(`(() => { window.__switches = []; window.__switchStatus = 200; window.__switchQueue = []; window.__switchBody = { ok: true, profile: 'haiku', active: { provider: 'claude', label: 'Claude subscription', model: 'claude-haiku-5-5' } }; })()`);
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'sonnet', profile: 'sonnet', epoch: 'r1' })`);
+    await page.waitFor(`window.__switches.length === 1`, { what: 'the helper to be asked' });
+    check(await page.eval(`JSON.stringify(window.__switches)`) === '[{"id":"haiku"}]', 'it is asked for the chosen model');
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'sonnet', profile: 'sonnet', epoch: 'r1' })`);
+    await new Promise((r) => setTimeout(r, 500));
+    check(await page.eval(`window.__switches.length`) === 1, 'the same difference is not asked twice');
+    await page.eval(`window.__event({ type: 'config', provider: 'claude', label: 'Claude subscription', model: 'claude-haiku-5-5', profile: 'haiku', epoch: 'r1' })`);
+    await new Promise((r) => setTimeout(r, 300));
+    check(await page.eval(`window.__switches.length`) === 1, 'nothing is asked when the helper is on the chosen model');
+  });
+
   await scenario('a helper switch the relay stopped waiting for is taken from the companion\'s next config event', async () => {
     await page.eval(`window.__event({ type: 'status', companionOnline: true, busy: true, epoch: 'r1', openTurns: [] })`);
     await settle();

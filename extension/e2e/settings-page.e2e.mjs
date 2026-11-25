@@ -655,18 +655,14 @@ const focusedId = (page) => page.eval(`document.activeElement ? document.activeE
     rows = await profileRows(page);
     assert.deepEqual(rows.map((r) => r.name), ['Gemma', 'Qwen']);
     assert.equal(await focusedId(page), `profile-${gemma}-drag`, 'focus stays on the grip');
-    // Dragging the grip of the last row above the first one reorders and saves.
-    await page.eval(`(() => {
-      const handle = document.getElementById('profile-${qwen}-drag');
-      handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-      const row = handle.closest('.profile');
-      const dt = new DataTransfer();
-      row.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
-      const list = document.getElementById('profiles');
-      const first = list.querySelector('.profile:not(.dragging)').getBoundingClientRect();
-      list.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, clientY: first.top + 2, dataTransfer: dt }));
-      row.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
-    })()`);
+    // Dragging the grip of the last row above the first one reorders and saves
+    // (real mouse events: press on the grip, move up past the first row, let go).
+    const grip = await page.eval(`(() => { const g = document.getElementById('profile-${qwen}-drag').getBoundingClientRect(); const first = document.querySelector('#profiles .profile').getBoundingClientRect(); return { x: g.left + g.width / 2, y: g.top + g.height / 2, topY: first.top + 4 }; })()`);
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: grip.x, y: grip.y });
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: grip.x, y: grip.y, button: 'left', clickCount: 1 });
+    for (let k = 1; k <= 6; k += 1) await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: grip.x, y: grip.y + ((grip.topY - grip.y) * k) / 6, button: 'left', buttons: 1 });
+    assert.equal(await page.eval(`document.querySelectorAll('.profile.dragging').length`), 1, 'the row being dragged looks lifted');
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: grip.x, y: grip.topY, button: 'left', clickCount: 1 });
     assert.deepEqual((await profileRows(page)).map((r) => r.name), ['Qwen', 'Gemma'], 'a drag moves the row');
     assert.equal(await page.eval(`document.querySelector('.profile.dragging')`), null, 'nothing is left looking dragged');
     await page.waitFor(`document.getElementById('save-result').textContent.startsWith('Saved')`, { what: 'the drag saved', timeout: 20000 });
