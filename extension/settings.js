@@ -970,24 +970,11 @@
     box.appendChild(num);
   }
 
+  // The running version, with the way to the Changelog tab.
   function renderFoot() {
-    // The running version, with the way to the Changelog tab.
     const line = $("version-line");
     line.textContent = "";
     line.append(`Version ${api.runtime.getManifest().version}. `, h("a", { href: "#changelog", text: "What's new" }));
-    const foot = $("foot");
-    foot.textContent = "";
-    if (runtimeOf(selected) === "extension") {
-      foot.appendChild(
-        document.createTextNode(
-          "Stored in this browser's extension storage."
-        )
-      );
-      return;
-    }
-    foot.appendChild(document.createTextNode("Stored in "));
-    foot.appendChild(h("code", { id: "path", text: helper ? helper.settings.settingsPath : "your config folder" }));
-    foot.appendChild(document.createTextNode("."));
   }
 
   // Runs `draw`, which rebuilds part of the page, and puts the focus back on

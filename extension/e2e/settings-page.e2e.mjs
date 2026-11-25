@@ -200,7 +200,7 @@ await scenario('first run shows the historic default (Claude subscription) and t
   assert.equal(await page.eval(`document.getElementById('save')`), null, 'there is no Save button');
   assert.equal(await page.eval(`document.getElementById('models-section')`), null, 'and no second card for the Tutor tab models');
   assert.equal(await page.eval(`getComputedStyle(document.querySelector('.savebar')).display`), 'none', 'the status bar is not there while it has nothing to say');
-  assert.match(await text(page, '#path'), /settings\.json/);
+  assert.equal(await page.eval(`document.getElementById('foot')`), null, 'no "Stored in" line');
   await page.screenshot(path.join(shots, 'first-run-dark.png'), { scheme: 'dark' });
   await page.screenshot(path.join(shots, 'first-run-light.png'), { scheme: 'light' });
 });
@@ -487,7 +487,6 @@ function stubServer({ status = 200 } = {}) {
     assert.equal(await text(page, '#connection-text'), 'Not set up');
     assert.equal(await page.eval(`document.getElementById('offline').hidden`), true, 'no helper warning');
     assert.match(await text(page, '#providers'), /OLLAMA_ORIGINS=chrome-extension:\/\//);
-    assert.match(await text(page, '#foot'), /extension storage/);
     await page.type('#local-baseUrl', model.url);
     await openAdd(page);
   await page.click('#local-find');

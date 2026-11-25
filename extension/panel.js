@@ -1318,11 +1318,14 @@
     /* The Tutor | Interviewer switch: two toggle buttons in one small outlined
        group, the chosen one filled. It never shrinks (the status and the model
        name give way first) and sits just left of the model button. */
-    .mode { flex: none; display: flex; align-items: center; gap: 2px; height: 22px; box-sizing: border-box; padding: 2px; border: 1px solid var(--line); border-radius: 6px; }
+    .mode { position: relative; flex: none; display: flex; align-items: center; gap: 2px; height: 22px; box-sizing: border-box; padding: 2px; border: 1px solid var(--line); border-radius: 6px; }
     .mode[hidden] { display: none; }
-    button.mode-opt { flex: none; width: auto; height: 16px; padding: 0 8px; border-radius: 4px; color: var(--muted); font: 500 12px / 16px var(--font); white-space: nowrap; cursor: pointer; }
+    .mode-thumb { position: absolute; left: 0; top: 0; width: 0; height: 0; border-radius: 4px; background: var(--fill); pointer-events: none; opacity: 0; }
+    .mode-thumb[data-ready] { opacity: 1; transition: left 0.5s cubic-bezier(0.4, 0, 0.2, 1), width 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+    button.mode-opt { position: relative; z-index: 1; flex: none; width: auto; height: 16px; padding: 0 8px; border-radius: 4px; color: var(--muted); font: 500 12px / 16px var(--font); white-space: nowrap; cursor: pointer; transition: color 0.5s ease; }
     button.mode-opt:hover:not(:disabled):not([aria-pressed="true"]) { color: var(--fg); }
-    button.mode-opt[aria-pressed="true"] { color: var(--fg); background: var(--fill); cursor: default; }
+    button.mode-opt[aria-pressed="true"] { color: var(--fg); cursor: default; }
+    @media (prefers-reduced-motion: reduce) { .mode-thumb[data-ready], button.mode-opt { transition: none; } }
     button.mode-opt:disabled:not([aria-pressed="true"]) { opacity: 0.55; cursor: progress; }
     button.mode-opt:focus-visible { outline: 1px solid color-mix(in srgb, var(--fg) 45%, transparent); outline-offset: 0; }
     /* The "Updated to x.y.z" row under the header, shown until it is
@@ -1876,6 +1879,10 @@
     modeGroup.hidden = true;
     modeGroup.setAttribute("role", "group");
     modeGroup.setAttribute("aria-label", "Tutor mode");
+    // The highlight slides to the chosen option instead of jumping.
+    const modeThumb = el("span", "mode-thumb");
+    modeThumb.setAttribute("aria-hidden", "true");
+    modeGroup.appendChild(modeThumb);
     const modeButtons = {};
     for (const [id, label] of [
       ["tutor", "Tutor"],
@@ -2006,7 +2013,7 @@
     // here must trigger neither, so keys stop at the host.
     for (const type of ["keydown", "keyup", "keypress"]) host.addEventListener(type, (e) => e.stopPropagation());
 
-    const p = { host, wrap, status, statusText, headRight, modeGroup, modeButtons, updateRow, updateText, model, provider, menu, gear, practice, progress, banner, scroll, view, feed, box, input, send, hint, counter };
+    const p = { host, wrap, status, statusText, headRight, modeGroup, modeThumb, modeButtons, updateRow, updateText, model, provider, menu, gear, practice, progress, banner, scroll, view, feed, box, input, send, hint, counter };
     for (const [id, button] of Object.entries(modeButtons)) button.addEventListener("click", () => chooseMode(id));
     wireSwitcher(p);
     return p;
@@ -2931,6 +2938,14 @@
       if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
       const locked = Boolean(switchingMode);
       if (button.disabled !== locked) button.disabled = locked;
+    }
+    // Slide the highlight under the chosen option (the first placement is not animated).
+    const activeOpt = p.modeButtons[mode];
+    if (!p.modeGroup.hidden && activeOpt && activeOpt.offsetWidth) {
+      const t = p.modeThumb;
+      const box = { left: `${activeOpt.offsetLeft}px`, top: `${activeOpt.offsetTop}px`, width: `${activeOpt.offsetWidth}px`, height: `${activeOpt.offsetHeight}px` };
+      for (const [name, value] of Object.entries(box)) if (t.style[name] !== value) t.style[name] = value;
+      if (!t.hasAttribute("data-ready")) requestAnimationFrame(() => requestAnimationFrame(() => t.setAttribute("data-ready", "")));
     }
 
     const practiceHidden = !slug || !messagingRuntime();
